@@ -1,0 +1,154 @@
+// probe.go — Phase 0 recon probe for the vendored SQLite driver.
+// Standalone (not part of the Ledgerboard repo). Mirrors the exact DSN and
+// pragma strategy used by internal/db/db.go so the findings transfer.
+package main
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	_ "modernc.org/sqlite"
+)
+
+var ctx = context.Background()
+
+func must(err error) {
+	if err != nil {
+		fmt.Println("FATAL:", err)
+		os.Exit(1)
+	}
+}
+
+func main() {
+	dir, _ := os.MkdirTemp("", "sqlprobe")
+	defer os.RemoveAll(dir)
+
+	// ---- 1. SQLite version actually compiled into the driver -------------
+	db, err := sql.Open("sqlite", dir+"/v.db")
+	must(err)
+	var ver string
+	must(db.QueryRow("SELECT sqlite_version()").Scan(&ver))
+	fmt.Println("1. sqlite_version()      =", ver)
+
+	// ---- 2. RETURNING support -------------------------------------------
+	_, err = db.Exec(`CREATE TABLE r(id INTEGER PRIMARY KEY, v TEXT)`)
+	must(err)
+	var rid int
+	err = db.QueryRow(`INSERT INTO r(v) VALUES('a') RETURNING id`).Scan(&rid)
+	fmt.Printf("2. RETURNING             = err=%v id=%d\n", err, rid)
+
+	// ---- 3. DSN _pragma syntax ------------------------------------------
+	db2, err := sql.Open("sqlite", "file:"+dir+"/p.db?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
+	must(err)
+	db2.SetMaxOpenConns(4)
+	var bt, fk int
+	must(db2.QueryRow("PRAGMA busy_timeout").Scan(&bt))
+	must(db2.QueryRow("PRAGMA foreign_keys").Scan(&fk))
+	fmt.Printf("3. DSN _pragma           = busy_timeout=%d foreign_keys=%d\n", bt, fk)
+
+	// Prove the DSN pragmas apply to *every* pooled connection, not just one.
+	var wg sync.WaitGroup
+	results := make([]int, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			conn, err := db2.Conn(ctx)
+			if err != nil {
+				results[i] = -1
+				return
+			}
+			defer conn.Close()
+			var b, f int
+			_ = conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&b)
+			_ = conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&f)
+			results[i] = b*10 + f
+		}(i)
+	}
+	wg.Wait()
+	fmt.Println("3b. per-conn (bt*10+fk)  =", results, "(expect all 50001)")
+
+	// ---- 4. Upstream strategy: Exec(PRAGMA ...) once, then pool ----------
+	db3, err := sql.Open("sqlite", dir+"/up.db")
+	must(err)
+	db3.SetMaxOpenConns(8)
+	_, err = db3.Exec("PRAGMA journal_mode=WAL")
+	must(err)
+	_, err = db3.Exec("PRAGMA foreign_keys=ON")
+	must(err)
+	var perConn []int
+	for i := 0; i < 8; i++ {
+		conn, err := db3.Conn(ctx)
+		if err != nil {
+			perConn = append(perConn, -1)
+			continue
+		}
+		var f int
+		_ = conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&f)
+		conn.Close()
+		perConn = append(perConn, f)
+	}
+	fmt.Println("4. upstream per-conn FK  =", perConn, "(all 1 only if DSN-pragma'd)")
+
+	// ---- 5. Concurrent writes, no busy_timeout (upstream config) --------
+	fmt.Println("5. no busy_timeout       =", runWriters(dir+"/w1.db", false))
+
+	// ---- 6. Concurrent writes, busy_timeout(5000) -----------------------
+	fmt.Println("6. busy_timeout(5000)    =", runWriters(dir+"/w2.db", true))
+}
+
+// runWriters hammers one row with concurrent UPDATEs and reports failures.
+func runWriters(path string, withTimeout bool) string {
+	dsn := path
+	if withTimeout {
+		dsn = "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return "open error: " + err.Error()
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(8)
+	if !withTimeout {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			return "pragma error: " + err.Error()
+		}
+	}
+	if _, err := db.Exec(`CREATE TABLE t(id INTEGER PRIMARY KEY, v INTEGER)`); err != nil {
+		return "create error: " + err.Error()
+	}
+	if _, err := db.Exec(`INSERT INTO t(id,v) VALUES(1,0)`); err != nil {
+		return "insert error: " + err.Error()
+	}
+
+	const n = 40
+	var ok, busy, other int64
+	var firstOther atomic.Value
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := db.Exec(`UPDATE t SET v = v + 1 WHERE id = 1`)
+			switch {
+			case err == nil:
+				atomic.AddInt64(&ok, 1)
+			case strings.Contains(err.Error(), "SQLITE_BUSY"), strings.Contains(err.Error(), "database is locked"):
+				atomic.AddInt64(&busy, 1)
+			default:
+				atomic.AddInt64(&other, 1)
+				firstOther.Store(err.Error())
+			}
+		}()
+	}
+	wg.Wait()
+	var final int
+	_ = db.QueryRow(`SELECT v FROM t WHERE id=1`).Scan(&final)
+	return fmt.Sprintf("ok=%d busy=%d other=%d final_v=%d/%d other_err=%v",
+		ok, busy, other, final, n, firstOther.Load())
+}

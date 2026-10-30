@@ -1,0 +1,12 @@
+event: ping
+data: {}
+
+event: board_change
+data: {"type":"ticket.created","board_id":"d3251bb6a7604239a8361c9c90ae3296"}
+
+event: board_change
+data: {"type":"note.created","board_id":"d3251bb6a7604239a8361c9c90ae3296"}
+
+event: board_change
+data: {"type":"task.created","board_id":"d3251bb6a7604239a8361c9c90ae3296"}
+

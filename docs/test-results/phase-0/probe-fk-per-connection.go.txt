@@ -1,0 +1,63 @@
+// probe2.go — does upstream's `db.Exec("PRAGMA foreign_keys=ON")` reach every
+// pooled connection, or only the one that happened to serve the Exec?
+package main
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+
+	_ "modernc.org/sqlite"
+)
+
+func main() {
+	dir, _ := os.MkdirTemp("", "fkprobe")
+	defer os.RemoveAll(dir)
+	ctx := context.Background()
+
+	// Exactly what internal/db/db.go does: plain path DSN, then two Execs.
+	db, err := sql.Open("sqlite", dir+"/up.db")
+	if err != nil {
+		fmt.Println("FATAL:", err)
+		return
+	}
+	db.SetMaxOpenConns(8)
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		fmt.Println("FATAL:", err)
+		return
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		fmt.Println("FATAL:", err)
+		return
+	}
+	// Schema first, while the pool still has free connections.
+	if _, err := db.Exec(`CREATE TABLE parent(id TEXT PRIMARY KEY)`); err != nil {
+		fmt.Println("create parent:", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE child(id TEXT PRIMARY KEY, pid TEXT REFERENCES parent(id))`); err != nil {
+		fmt.Println("create child:", err)
+	}
+
+	// Hold 8 connections open at the same time, then read the pragma on each
+	// and try a deliberately dangling FK insert on each.
+	conns := make([]*sql.Conn, 0, 8)
+	for i := 0; i < 8; i++ {
+		c, err := db.Conn(ctx)
+		if err != nil {
+			fmt.Println("conn error:", err)
+			return
+		}
+		conns = append(conns, c)
+	}
+	res := make([]int, 0, 8)
+	for i, c := range conns {
+		var f int
+		_ = c.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&f)
+		res = append(res, f)
+		_, err := c.ExecContext(ctx, `INSERT INTO child(id,pid) VALUES(?,?)`, fmt.Sprintf("c%d", i), "no-such-parent")
+		fmt.Printf("conn %d foreign_keys=%d dangling-FK insert -> %v\n", i, f, err)
+		c.Close()
+	}
+	fmt.Println("simultaneous-conn foreign_keys =", res)
+}

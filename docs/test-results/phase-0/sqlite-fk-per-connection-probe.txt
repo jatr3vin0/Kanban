@@ -1,0 +1,9 @@
+conn 0 foreign_keys=1 dangling-FK insert -> constraint failed: FOREIGN KEY constraint failed (787)
+conn 1 foreign_keys=0 dangling-FK insert -> <nil>
+conn 2 foreign_keys=0 dangling-FK insert -> <nil>
+conn 3 foreign_keys=0 dangling-FK insert -> <nil>
+conn 4 foreign_keys=0 dangling-FK insert -> <nil>
+conn 5 foreign_keys=0 dangling-FK insert -> <nil>
+conn 6 foreign_keys=0 dangling-FK insert -> <nil>
+conn 7 foreign_keys=0 dangling-FK insert -> <nil>
+simultaneous-conn foreign_keys = [1 0 0 0 0 0 0 0]

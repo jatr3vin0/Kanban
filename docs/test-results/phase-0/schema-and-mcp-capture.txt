@@ -1,0 +1,243 @@
+########## .schema (sqlite3 CLI, after golang-migrate ran)
+CREATE TABLE schema_migrations (version uint64,dirty bool);
+CREATE UNIQUE INDEX version_unique ON schema_migrations (version);
+CREATE TABLE boards (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE epics (
+    id          TEXT PRIMARY KEY,
+    board_id    TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE tickets (
+    id          TEXT PRIMARY KEY,
+    board_id    TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    epic_id     TEXT REFERENCES epics(id) ON DELETE SET NULL,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'todo',
+    priority    TEXT NOT NULL DEFAULT 'medium',
+    assignee    TEXT NOT NULL DEFAULT '',
+    resolution  TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE ticket_events (
+    id         TEXT PRIMARY KEY,
+    ticket_id  TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL,
+    actor      TEXT NOT NULL DEFAULT '',
+    payload    TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX ticket_events_ticket_id ON ticket_events(ticket_id);
+CREATE TABLE notes (
+    id         TEXT PRIMARY KEY,
+    ticket_id  TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE tasks (
+    id         TEXT PRIMARY KEY,
+    ticket_id  TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    title      TEXT NOT NULL,
+    done       INTEGER NOT NULL DEFAULT 0,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX tasks_ticket_id ON tasks(ticket_id);
+CREATE TABLE ticket_relations (
+    from_ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    to_ticket_id   TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    kind           TEXT NOT NULL DEFAULT 'blocks',
+    created_at     TEXT NOT NULL,
+    PRIMARY KEY (from_ticket_id, to_ticket_id, kind)
+);
+CREATE INDEX ticket_relations_from ON ticket_relations(from_ticket_id);
+CREATE INDEX ticket_relations_to   ON ticket_relations(to_ticket_id);
+
+########## tables
+index|sqlite_autoindex_boards_1
+index|sqlite_autoindex_epics_1
+index|sqlite_autoindex_notes_1
+index|sqlite_autoindex_tasks_1
+index|sqlite_autoindex_ticket_events_1
+index|sqlite_autoindex_ticket_relations_1
+index|sqlite_autoindex_tickets_1
+index|tasks_ticket_id
+index|ticket_events_ticket_id
+index|ticket_relations_from
+index|ticket_relations_to
+index|version_unique
+table|boards
+table|epics
+table|notes
+table|schema_migrations
+table|tasks
+table|ticket_events
+table|ticket_relations
+table|tickets
+
+########## PRAGMA user_version
+0
+
+########## golang-migrate bookkeeping table
+1|0
+
+########## PRAGMA table_info(tickets)
+cid|name|type|notnull|dflt_value|pk
+0|id|TEXT|0||1
+1|board_id|TEXT|1||0
+2|epic_id|TEXT|0||0
+3|title|TEXT|1||0
+4|description|TEXT|1|''|0
+5|status|TEXT|1|'todo'|0
+6|priority|TEXT|1|'medium'|0
+7|assignee|TEXT|1|''|0
+8|resolution|TEXT|0||0
+9|created_at|TEXT|1||0
+10|updated_at|TEXT|1||0
+
+########## PRAGMA index_list(tickets) / foreign_key_list(tickets)
+0|sqlite_autoindex_tickets_1|1|pk|0
+0|0|epics|epic_id|id|NO ACTION|SET NULL|NONE
+1|0|boards|board_id|id|NO ACTION|CASCADE|NONE
+
+########## any claim/lock/lease/version column anywhere?
+schema_migrations.version
+(empty above == none exist)
+
+########## journal_mode / busy_timeout as seen by the app's own pool
+wal
+
+########## MCP initialize + tools/list over Streamable HTTP
+--- response headers ---
+HTTP/1.1 200 OK
+Content-Type: application/json
+Mcp-Session-Id: mcp-session-e7d4c5c2-345d-46e4-8777-dec7cb96571f
+Date: Fri, 30 Oct 2026 23:09:14 GMT
+Content-Length: 148
+
+session=mcp-session-e7d4c5c2-345d-46e4-8777-dec7cb96571f
+--- initialize body ---
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"kanban-mcp","version":"1.0.0"}}}
+
+TOOL board  desc=Manage boards. action: list, get, create, update, delete, summary, context, ready
+TOOL epic  desc=Manage epics. action: list, get, create, update, delete
+TOOL note  desc=Manage agent scratchpad notes on a ticket. Use notes to record observations, intermediate reasoning, investigation logs, and any other machine-readable context. action: list, add, update, delete
+TOOL relation  desc=Manage blocking relations between tickets. action: list, add, delete
+TOOL task  desc=Manage checklist tasks on a ticket. action: list, create, bulk_create, update, delete
+TOOL ticket  desc=Manage tickets. action: list, get, create, bulk_create, update, delete, history
+
+--- full input schemas ---
+{
+  "name": "board",
+  "required": [
+    "action"
+  ],
+  "properties": [
+    "action",
+    "description",
+    "filter_status",
+    "id",
+    "name",
+    "omit_descriptions"
+  ]
+}
+{
+  "name": "epic",
+  "required": [
+    "action"
+  ],
+  "properties": [
+    "action",
+    "board_id",
+    "description",
+    "id",
+    "title"
+  ]
+}
+{
+  "name": "note",
+  "required": [
+    "action"
+  ],
+  "properties": [
+    "action",
+    "body",
+    "id",
+    "ticket_id"
+  ]
+}
+{
+  "name": "relation",
+  "required": [
+    "action"
+  ],
+  "properties": [
+    "action",
+    "ticket_id",
+    "to_ticket_id"
+  ]
+}
+{
+  "name": "task",
+  "required": [
+    "action"
+  ],
+  "properties": [
+    "action",
+    "done",
+    "id",
+    "ticket_id",
+    "title",
+    "titles_json"
+  ]
+}
+{
+  "name": "ticket",
+  "required": [
+    "action"
+  ],
+  "properties": [
+    "action",
+    "assignee",
+    "board_id",
+    "description",
+    "epic_id",
+    "filter_assignee",
+    "filter_epic_id",
+    "filter_priority",
+    "filter_status",
+    "id",
+    "include_history",
+    "include_notes",
+    "include_relations",
+    "include_tasks",
+    "priority",
+    "q",
+    "resolution_json",
+    "sort_by",
+    "sort_order",
+    "status",
+    "tickets_json",
+    "title"
+  ]
+}
+
+########## MCP error shape for an unknown action
+{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"unknown action \"nope\""}],"isError":true}}
+
+########## MCP error shape for a missing required arg
+{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"id required"}],"isError":true}}
+
+done
