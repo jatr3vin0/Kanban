@@ -212,7 +212,7 @@ All payloads are JSON objects. `generation` is the **post**-transition generatio
 |---|---|---|
 | `claimed` | a claim or `claim_next` succeeds | `{"request_id","generation","actor_type","lease_expires_at":<ms>,"previous_holder":<string\|null>,"previous_generation":<int>,"source":"claim"\|"claim_next"}` |
 | `claim_renewed` | a renewal succeeds | `{"request_id","generation","previous_expires_at":<ms>,"lease_expires_at":<ms>,"renewals":<int>}` |
-| `claim_released` | holder release, human release, or expiry sweep | `{"request_id","generation","previous_holder","actor_type","status_from","status_to","reason":"release"\|"expiry"\|"override"}` |
+| `claim_released` | holder release, human release, or expiry sweep | `{"request_id","generation","previous_holder","actor_type","status_from","status_to","reason":"release"\|"expiry"\|"override"\|"status"}` |
 | `claim_reassigned` | human/orchestrator reassign (incl. takeover of a live lease) | `{"request_id","generation","previous_generation","from_holder":<string\|null>,"to_holder","to_holder_type","lease_expires_at":<ms>,"override":<bool>}` |
 | `claim_revoked` | human/orchestrator revoke (claim dies, ticket stays as it is) | `{"request_id","generation","previous_holder","reason"}` |
 | `handoff_created` | handoff accepted at creation time | `{"request_id","handoff_id","generation","schema_version":1,"to_actor":<string\|null>,"supersedes":<string\|null>}` |
@@ -263,6 +263,7 @@ vocabulary. `blocked` is a first-class status (recon D1 — the earlier design d
 | T6 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `revoke` | human, orchestrator | ticket exists | `+1` | `+1` | 200 + ticket |
 | T7 | `ACTIVE` → `ACTIVE` | `handoff` accept | current holder → `to_actor`, or claimer of an offered handoff | holder + generation match, or offered handoff | `+1` | `+1` | 200 + handoff |
 | T8 | `ACTIVE` → `ACTIVE` | human takeover (reassign to self) | human | same as T5 | `+1` | `+1` | 200 + ticket |
+| T9 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | status change to `done` or `blocked`, or leaving `blocked`, while claimed | any | status transition valid | `+1` | `+1` | 200 + ticket |
 
 | ID | Rule |
 |---|---|
@@ -447,7 +448,7 @@ lock is still held, so the read is consistent with the statement that just faile
 | `C-INV-1` | At most one active holder per ticket. | Ownership is a column on one row; there is no second place to record a holder. |
 | `C-INV-2` | `lease_generation` is strictly monotonic per ticket: it only ever increases, by exactly 1, on an ownership transition; it is never reset and never decremented. | Every transition statement contains `lease_generation = lease_generation + 1`; no statement writes a literal generation. |
 | `C-INV-3` | A ticket with `lease_holder IS NULL` has `lease_expires_at`, `lease_acquired_at` and `lease_holder_type` all `NULL` and `lease_renewals = 0`. | The release/sweep/revoke statements set all five together in one row update; a partial clear is a contract violation. |
-| `C-INV-4` | A live lease (`lease_expires_at > now`) implies `status = 'in_progress'` unless a human changed the status; the status never silently reverts. | Claim sets `in_progress`; release/sweep only downgrade `in_progress`. |
+| `C-INV-4` | A live lease always implies `status = 'in_progress'`. The only way to move a claimed ticket out of `in_progress` is to end the claim in the same statement (T9: a status change to `done`/`blocked` releases the lease). | Claim sets `in_progress`; release/sweep/T9 clear the holder in the same row update; nothing else writes `status` without either the ownership guard or an explicit release. |
 | `C-INV-5` | No mutation is a read-then-write. | `C-CONV-4`; reviewable by grepping for `SELECT` before `UPDATE` in the store package. |
 | `C-INV-6` | `version` increases by exactly 1 on every accepted mutation that changes client-visible state, and by 0 on renewal. | The `SET` clause of each statement. |
 | `C-INV-7` | Every lease comparison uses INTEGER ms and `now_ms` from the server. | `C-CONV-1`, `C-CONV-2`. |
@@ -485,7 +486,7 @@ alike. The summary:
 |---|---|---|---|
 | `claim`, `claim_next` | optional (if supplied, mismatch → `version_conflict`) | **no** | A claim is a transition, not a write against a known state; requiring the generation would make the first claim impossible (`generation = 0`). |
 | `renew_claim`, `release_claim` | no | **required** | Both are holder-only; the generation is the proof of holding. |
-| Claim-protected content mutation by an **agent** (ticket update, task/note/relation writes, status change) | **required** | **required** | `C-FENCE-5`. |
+| Claim-protected ticket mutation by an **agent**: ticket content/status/priority/assignee/resolution/epic, ticket delete, handoff create, memory-write submit (`docs/concurrency.md` §3–§4) | **required** | **required** | `C-FENCE-5`. Task, note and relation writes are **open** even on a claimed ticket (`C-OPEN-1`–`C-OPEN-3`). |
 | Same mutation by a **human** or **orchestrator** | optional | not required | Humans are not fenced (spec §5.5); they still bump `version` and, for ownership-changing overrides, the generation. |
 | `reassign`, `revoke`, `unblock` | no | not required | Override authority; `override: true` is required over a live lease. |
 | Board / epic CRUD, ticket create, bulk create | no | no | Not ticket-owned; idempotency only (§4). |
@@ -508,7 +509,9 @@ alike. The summary:
 | expiry sweep | invalid | issued (holder `NULL`) | dead |
 | handoff accept | invalid | issued | dead |
 | renew | **still valid** | unchanged | live |
-| content edit, task/note/relation change, status change | still valid | unchanged | live |
+| content edit, task/note/relation change | still valid | unchanged | live |
+| status change **to** `done` or `blocked`, or **leaving** `blocked` | invalid, and the holder is cleared | issued | dead |
+| status change between `todo` and `in_progress` with no lease held | unchanged | unchanged | n/a |
 
 | ID | Rule |
 |---|---|
