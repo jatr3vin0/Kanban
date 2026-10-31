@@ -522,3 +522,602 @@ alike. The summary:
 |---|---|
 | `C-FENCE-11` | Human/orchestrator overrides are classified by whether they change **ownership-bearing state**, and only those bump the generation: `reassign`, `release`, `revoke`, status change to/from `done` or `blocked`, and `unblock`. A pure **content edit** by a human bumps `version` only. `[LEAD-DECIDED]` — read literally, §5.5 would kick an agent off its ticket because a human fixed a typo in the description, which would make the board unusable; the version bump already forces the agent to re-read before its next write, so no stale write survives. The classification is a single table in the service layer, so if the owner wants the literal reading it is a one-row change, not a redesign. **Flagged for the owner** — see `[OWNER-1]` in §10. |
 | `C-FENCE-12` | An agent can never present itself as a human: the actor type comes from server configuration (`C-AUTH-1`), never from the request body. Any `actor`, `actor_type`, `generation` or `lease_*` field in a request body is ignored and reported as an unknown field (`C-COMPAT-5`). |
+
+---
+
+## 4. Idempotency rules
+
+### 4.1 Scope, key and operation names
+
+| ID | Rule |
+|---|---|
+| `C-IDEM-1` | The scope is the triple **`(actor, operation, key)`** — spec §7. Two different agents may use the same key string without colliding, and one agent may use the same key for two different operations. The uniqueness is the primary key of `idempotency_keys` (`C-SCHEMA-17`); a duplicate insert is the conflict signal. |
+| `C-IDEM-2` | `key` is 1–128 characters from `[A-Za-z0-9._:-]`. Anything else is `400 invalid_request` with `details.field = "idempotency_key"`. It is **never** derived from the payload server-side — the client owns it. |
+| `C-IDEM-3` | `operation` is one of the fixed names below. It is assigned by the service layer, not the client, so a client cannot make two different operations share a scope by lying. |
+
+| `operation` | Transport entry points | Key required? |
+|---|---|---|
+| `ticket.create` | `POST /api/v1/boards/{id}/tickets`, MCP `ticket{create}` | **optional** |
+| `ticket.bulk_create` | `POST /api/v1/boards/{id}/tickets/bulk`, MCP `ticket{bulk_create}` | **optional** |
+| `ticket.claim` | `POST /api/v1/tickets/{id}/claim`, `POST /api/v1/boards/{id}/claim-next`, MCP `claim{claim\|next}` | **required** |
+| `handoff.create` | `POST /api/v1/tickets/{id}/handoffs`, MCP `handoff{create}` | **required** |
+| `handoff.accept` | `POST /api/v1/handoffs/{id}/accept`, MCP `handoff{accept}` | **required** |
+| `memory.write.submit` | `POST /api/v1/tickets/{id}/memory-writes`, MCP `memory{write}` | **required** |
+| `memory.write.deliver` | internal worker only (never a client entry point) | the outbox `id` **is** the key |
+
+| ID | Rule |
+|---|---|
+| `C-IDEM-4` | Optional means: when the key is absent, the request executes normally with no idempotency record. Required means: absent → `400 invalid_request` with `details.field = "idempotency_key"`. `[LEAD-DECIDED]` — ticket create and bulk create exist in upstream clients that know nothing about keys (`C-COMPAT-2`); the claim/handoff/memory operations are new, so requiring the key there costs no compatibility and buys the guarantee exactly where a retry is dangerous. |
+| `C-IDEM-5` | `memory.write.deliver` never accepts a client key: the stable outbox `id` (`C-SCHEMA-14`) is passed to the adapter as its idempotency key on **every** attempt, so a duplicate delivery is deduplicable at the far end. |
+
+### 4.2 Replay semantics
+
+| ID | Rule |
+|---|---|
+| `C-IDEM-6` | **Same key + same payload hash** → the original response is replayed: same HTTP status, same body **bytes** (`response_body` is stored verbatim), plus `Idempotency-Replayed: true` (REST header) / `"replayed": true` (MCP result field). The entity is **not** re-read: a replay returns what the first call returned, even if the ticket has changed since. |
+| `C-IDEM-7` | **Same key + different payload hash** → `409 idempotency_conflict`, details `{"operation", "key", "request_hash"}` (the *stored* hash, not the new one). The original request is unaffected. |
+| `C-IDEM-8` | Only **2xx** responses are recorded. A 4xx/5xx is never stored, so retrying a failed request with the same key re-executes it. `[LEAD-DECIDED]` — caching an error would freeze a transient failure into a permanent one for 72 h. |
+| `C-IDEM-9` | A replay never re-publishes SSE and never writes a second audit row: the mutation did not happen again. |
+| `C-IDEM-10` | `request_hash` is the lowercase hex SHA-256 of the **canonical JSON of the decoded request**: object keys sorted by byte value, no insignificant whitespace, UTF-8, arrays in order, numbers in shortest round-trip form, and fields the server ignores (unknown fields, `null` vs absent treated as distinct only when the operation distinguishes them) excluded. Hashing the raw body bytes is forbidden — field order and whitespace are not semantics. |
+| `C-IDEM-11` | For `ticket.bulk_create`, the hash covers the whole array; a replay returns the same array of tickets with the same ids, not a second batch. |
+
+### 4.3 Storage and crash behaviour
+
+| ID | Rule |
+|---|---|
+| `C-IDEM-12` | The idempotency row is inserted in the **same transaction** as the mutation it records, and `response_body` is filled in before `COMMIT`. Therefore: either the mutation and its recorded response both exist, or neither does. There is no window in which a committed mutation lacks its key row. |
+| `C-IDEM-13` | Consequently a crash can only produce: (a) no key row and no mutation — a retry executes cleanly; or (b) both — a retry replays. It can never produce a mutation whose response was lost while the key row says it succeeded, because both commit together. `[LEAD-DECIDED]` — this is why the design needs no two-phase "in flight" reconciliation. |
+| `C-IDEM-14` | `status` has two values, `in_flight` and `completed`. `in_flight` exists only inside an uncommitted transaction and is therefore **never observable after commit**; if a reader ever sees it, the row is stale and the request is treated as retryable (`C-IDEM-8`). The column exists so the schema states the intent and a future multi-process deployment can keep the same shape. |
+| `C-IDEM-15` | Two concurrent requests with the same key: the second blocks on the write lock (up to `busy_timeout`), then finds the completed row and replays it. It must **not** return `409 idempotency_in_progress` merely because the first is still running unless the wait exceeded `busy_timeout`, in which case the response is `503 database_busy` (retryable, `C-ERR-8`). |
+| `C-IDEM-16` | Retention is **72 hours** (`expires_at = created_at + 259_200_000`). Purge runs (a) on startup and (b) opportunistically at most once every 10 minutes inside a write transaction, deleting `WHERE expires_at < :now_ms`. A purge never runs inside a request that is itself being deduplicated. `[LEAD-DECIDED]` — the spec says "e.g. 72h"; a fixed 72 h is what the docs and tests assert. |
+| `C-IDEM-17` | Keys are **server-side only**: never exposed as a URL path segment, never echoed in an error other than `C-IDEM-7`'s details, never written to the audit payload (only `request_id` is), and never used as an entity id. |
+| `C-IDEM-18` | Purging a key never affects the entity it created. After expiry, the same key is simply a new request again — which is the documented consequence of a 72 h window and must be stated in the API docs. |
+
+---
+
+## 5. Handoff JSON schema v1
+
+### 5.1 The document
+
+```json
+{
+  "schema_version": 1,
+  "id": "9f2c1b7a4e5d40c9a1b2c3d4e5f60718",
+  "ticket_id": "83f681a8a8864a1cbe1deff69e6570e9",
+  "board_id": "d3251bb6a7604239a8361c9c90ae3296",
+  "from_actor": "agent:builder-1",
+  "from_actor_type": "agent",
+  "to_actor": "agent:builder-2",
+  "generation": 7,
+  "status": "offered",
+  "supersedes": null,
+  "summary": "Parser rewrite is done and green; next is wiring the CLI flag.",
+  "done": ["Rewrote the tokenizer", "Added 14 table tests"],
+  "next": ["Wire --strict flag", "Update README section 4"],
+  "blockers": ["Needs the owner's decision on the wire value"],
+  "artifacts": [
+    {"kind": "commit", "ref": "a1b2c3d", "description": "tokenizer rewrite"},
+    {"kind": "pr", "ref": "https://github.com/jatr3vin0/Kanban/pull/12", "description": "phase 2"}
+  ],
+  "memory_writes": [
+    {"type": "finding", "content": "modernc.org/sqlite 3.51.2 supports UPDATE ... RETURNING", "confidence": 0.9, "tags": ["sqlite", "driver"]}
+  ],
+  "memory_refs": ["mem_01J9X8Z4QK"],
+  "created_at": "2026-10-30T23:08:22.180Z",
+  "accepted_by": null,
+  "accepted_at": null
+}
+```
+
+### 5.2 Fields
+
+| Field | Type | Required | Limits / validation |
+|---|---|---|---|
+| `schema_version` | integer | yes | must be exactly `1`. Any other value → `400 handoff_invalid`, `details.field = "schema_version"`. No forward-compat guessing: a future version is a new contract. |
+| `id` | string | server-assigned | 32 lowercase hex. A client-supplied `id` is ignored and reported as an unknown field. |
+| `ticket_id` | string | yes (path) | must exist; must match the path/argument ticket id, else `400 handoff_invalid`. |
+| `board_id` | string | server-assigned | derived from the ticket, never trusted from the body. |
+| `from_actor` | string | server-assigned | the authenticated actor (`C-AUTH-1`); a body value is ignored (`C-FENCE-12`). |
+| `from_actor_type` | string | server-assigned | one of `human`, `agent`, `orchestrator`, `system`. |
+| `to_actor` | string \| null | no | ≤ 200 chars, `[A-Za-z0-9._:-]`. `null` = offered to whoever claims next. |
+| `generation` | integer | server-assigned | the caller's fencing generation at creation (`C-SCHEMA-11`). |
+| `status` | string | server-assigned | `offered` on creation. |
+| `supersedes` | string \| null | no | an existing handoff id on the same ticket; self-reference → `400 handoff_invalid`. |
+| `summary` | string | **yes** | 1–4000 chars after `TrimSpace`; must be non-empty. This is the field an agent reads first, so an empty summary is rejected rather than defaulted. |
+| `done` | array\<string\> | no (default `[]`) | ≤ 50 items, each 1–500 chars after trim; empty strings dropped, not rejected. |
+| `next` | array\<string\> | no (default `[]`) | same limits as `done`. |
+| `blockers` | array\<string\> | no (default `[]`) | ≤ 20 items, each 1–500 chars. Free text, not ticket ids — a blocker that is a ticket is expressed as a `blocks` relation, which the board already understands. `[LEAD-DECIDED]` |
+| `artifacts` | array\<object\> | no (default `[]`) | ≤ 50 items. Each `{kind, ref, description?}`: `kind` ∈ `commit`, `pr`, `file`, `url`, `log`, `other`; `ref` 1–1000 chars, no whitespace-only, **no `user:pass@` userinfo in URLs** (`400 handoff_invalid`); `description` ≤ 500 chars. |
+| `memory_writes` | array\<object\> | no (default `[]`) | ≤ 50 items. Each `{type, content, confidence?, tags?}` — see §5.3. |
+| `memory_refs` | array\<string\> | no (default `[]`) | ≤ 50 items, each 1–200 chars. Ids of records already in the operator's memory, used to link a handoff to prior knowledge. |
+| `created_at`, `accepted_by`, `accepted_at` | string / null | server-assigned | never accepted from a request. |
+
+| ID | Rule |
+|---|---|
+| `C-HANDOFF-1` | The document is validated at the **service boundary**, so REST, MCP and any future CLI get identical validation (recon G11). Validation never lives in a handler. |
+| `C-HANDOFF-2` | Total size: the canonical JSON of the document must be ≤ **65 536 bytes**; over that → `400 handoff_invalid`, `details.field = "document"`. Per-field limits above apply first, so the total check is a backstop. |
+| `C-HANDOFF-3` | `memory_writes[].content` is 1–2000 chars and is the only free-text field that will be sent to the operator's memory system, so it is validated as strictly as `summary`. |
+| `C-HANDOFF-4` | Unknown fields are handled exactly like every other request: warn by default, reject under strict mode (`C-COMPAT-5`). A typo in `memory_writes` must never be silently dropped, because it means a durable memory write that never happens. |
+
+### 5.3 Memory types and confidence
+
+| ID | Rule |
+|---|---|
+| `C-HANDOFF-5` | `memory_writes[].type` ∈ **`fact`**, **`decision`**, **`requirement`**, **`finding`**, **`preference`**, **`continuation`**, **`lesson`** (spec §8). Anything else → `400 handoff_invalid`, `details.field = "memory_writes[3].type"`, `details.allowed = [...]`. Validated in Go, not by a `CHECK` (`C-CONV-5`). |
+| `C-HANDOFF-6` | `memory_writes[].confidence` is a JSON number in **[0.0, 1.0]** inclusive, optional, default **1.0**. Outside the range, `NaN`, `Infinity` or a string → `400 handoff_invalid`. `[LEAD-DECIDED]` — default 1.0 for a write an agent chose to make deliberately; a lower value is a statement the agent makes on purpose. |
+| `C-HANDOFF-7` | `memory_writes[].tags` is ≤ 16 items of ≤ 64 chars, `[A-Za-z0-9._:-]`; duplicates are collapsed preserving first-seen order. |
+| `C-HANDOFF-8` | The same `(type, content)` pair may appear twice in one handoff; both are enqueued. Deduplication against the operator's memory is the adapter's business, not ours (`C-OUTBOX-12`). |
+
+### 5.4 Canonical form and immutability
+
+| ID | Rule |
+|---|---|
+| `C-HANDOFF-9` | The **canonical form** is the v1 document with object keys sorted, no insignificant whitespace, arrays in submitted order, `null` omitted for optional fields, and times rendered with three fractional digits. Its SHA-256 is stored in `handoffs.checksum` (`C-SCHEMA-10`) and is what a client can compare to detect any change. |
+| `C-HANDOFF-10` | **Handoffs are immutable under ordinary operations.** There is no update path, no field patch, and no delete. The only writes after creation are the acceptance transition (`status`, `accepted_by`, `accepted_at`) and supersession (`status` → `superseded`). |
+| `C-HANDOFF-11` | A **correction is a new handoff** with `supersedes = <old id>`; the old row's `status` becomes `superseded` in the same transaction. The chain is walked newest-first and must not contain a cycle; a cycle attempt → `400 handoff_invalid`. |
+| `C-HANDOFF-12` | The `supersedes` chain is scoped to one ticket: superseding a handoff that belongs to a different ticket → `400 handoff_invalid`. |
+
+### 5.5 Creation, atomicity and ownership
+
+| ID | Rule |
+|---|---|
+| `C-HANDOFF-13` | Creating a handoff is a **claim-protected** operation: an `agent` must present the ticket's current `lease_holder` + `lease_generation` (`C-FENCE-2`); a `human`/`orchestrator` may create one without a lease (audited with `from_actor_type = human`). |
+| `C-HANDOFF-14` | Creating a handoff and inserting all of its `outbox` rows happen in **one transaction** (spec §8/§10). There is no state in which a handoff exists without its memory-write obligations, and none in which obligations exist for a handoff that was rejected. |
+| `C-HANDOFF-15` | Creating a handoff does **not** change ownership by itself: the author keeps the lease (and its generation) until it releases or another actor accepts. This lets an agent write two handoffs in a row without losing the ticket. `[LEAD-DECIDED]` |
+| `C-HANDOFF-16` | `accept` is the ownership transfer: in one statement it sets `lease_holder = acceptor`, `lease_holder_type = acceptor type`, `lease_acquired_at = now`, `lease_expires_at = now + ttl`, `lease_generation = lease_generation + 1`, `status = 'in_progress'`, `version = version + 1`, `handoff_id = <id>`, and marks the handoff `accepted` with `accepted_by`/`accepted_at`. The guard is `status = 'offered' AND (to_actor IS NULL OR to_actor = :acceptor)`; 0 rows → `409 handoff_not_acceptable`. |
+| `C-HANDOFF-17` | Accepting a handoff **does not require holding the lease first**: an offered handoff addressed to a specific actor is the authority to take over. Accepting one addressed to someone else is `409 handoff_not_acceptable`. |
+| `C-HANDOFF-18` | `tickets.handoff_id` is always the most recently **accepted** handoff. A superseded handoff does not change it. |
+
+### 5.6 Retrieval shapes
+
+All four shapes exist on both transports, with identical field names.
+
+| Shape | REST | MCP | Returns |
+|---|---|---|---|
+| latest | `GET /api/v1/tickets/{id}/handoff` | `handoff{action:"latest", ticket_id}` | the newest handoff by `created_at` (any status), full document. `404 not_found` when the ticket has none. |
+| history | `GET /api/v1/tickets/{id}/handoffs` | `handoff{action:"history", ticket_id}` | array of full documents, newest first; empty array (not 404) when none. |
+| by id | `GET /api/v1/handoffs/{id}` | `handoff{action:"get", id}` | one full document. `404 not_found` when absent. |
+| compact | `GET /api/v1/tickets/{id}/handoff?compact=true` | `handoff{action:"latest", ticket_id, compact:true}` | the shape below. |
+
+Compact shape (designed for an agent's context budget — no lists, only counts):
+
+```json
+{
+  "id": "9f2c1b7a4e5d40c9a1b2c3d4e5f60718",
+  "ticket_id": "83f681a8a8864a1cbe1deff69e6570e9",
+  "schema_version": 1,
+  "from_actor": "agent:builder-1",
+  "from_actor_type": "agent",
+  "to_actor": "agent:builder-2",
+  "status": "offered",
+  "generation": 7,
+  "created_at": "2026-10-30T23:08:22.180Z",
+  "summary": "Parser rewrite is done and green; next is wiring the CLI flag.",
+  "done_count": 2, "next_count": 2, "blocker_count": 1,
+  "artifact_count": 2, "memory_write_count": 1, "memory_ref_count": 1
+}
+```
+
+| ID | Rule |
+|---|---|
+| `C-HANDOFF-19` | `summary` is truncated in the compact shape only at 500 chars, with `summary_truncated: true` appended. Every other compact field is a count, never a list. |
+| `C-HANDOFF-20` | History is paginated by `?limit=` (default 20, max 100) and `?before=<created_at ms>`; the response carries `next_before` when more exist. Ordering is `created_at DESC, id DESC` so equal-millisecond handoffs are still totally ordered. |
+| `C-HANDOFF-21` | A handoff for a ticket the caller cannot see is `404 not_found`, never `403`: existence is not leaked. (v1 has no per-ticket visibility, so this is currently unobservable — it is the rule the deferred scopes in §8.4 must preserve.) |
+
+---
+
+## 6. Outbox states and the adapter contract
+
+### 6.1 State machine
+
+```
+                 enqueue (in the handoff transaction)
+                              │
+                              ▼
+                         ┌─────────┐
+      retryable ────────► │ pending │ ◄──── (MEMORY_DELIVERY=off: stays here)
+         ▲               └────┬────┘
+         │                    │ claim (lease 60 s, attempts+1)
+         │                    ▼
+         │             ┌─────────────┐   adapter returned an id + local ack committed
+         │             │ processing  │ ─────────────────────────────────► ┌───────────┐
+         │             └──────┬──────┘                                   │ succeeded │
+         │                    │                                          └───────────┘
+         │      ┌─────────────┼──────────────────┐
+         │      │             │                  │
+         │  definite      ambiguous         lease expired
+         │  failure       failure           (worker died)
+         │      │             │                  │
+         │      ▼             ▼                  ▼
+         │ ┌───────────┐ ┌───────────┐   ┌───────────┐
+         └─┤ retryable │ │ uncertain │──►│ uncertain │
+            └─────┬─────┘ └─────┬─────┘   └───────────┘
+                  │             │
+        attempts exhausted or permanent failure
+                  │             │
+                  ▼             ▼
+              ┌────────┐    ┌────────┐
+              │ failed │    │ failed │
+              └────────┘    └────────┘
+```
+
+| ID | Rule |
+|---|---|
+| `C-OUTBOX-1` | The status set is exactly **`pending`, `processing`, `retryable`, `succeeded`, `uncertain`, `failed`**, validated in Go (`C-CONV-5`). |
+| `C-OUTBOX-2` | `succeeded` is the only state that asserts the operator's memory has the write. It is set only after the adapter returned a non-empty external id **and** the local `UPDATE ... WHERE id = ? AND lease_owner = ?` committed with `RowsAffected() == 1`. |
+| `C-OUTBOX-3` | `uncertain` means: an attempt was made and we cannot know whether the far end accepted it. It is **never** reported as success and never silently retried as if it had failed. It is retried (safely — `C-OUTBOX-9`), but the state is visible in the UI and in `GET /api/v1/outbox?status=uncertain` until it resolves. |
+| `C-OUTBOX-4` | `failed` is terminal (dead-letter): attempts exhausted, or the adapter rejected the write as permanently invalid. It is recoverable only by an explicit human retry (`C-OUTBOX-13`). |
+
+### 6.2 Fields
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | TEXT PK | stable write id (`C-SCHEMA-14`); the adapter idempotency key |
+| `ticket_id`, `handoff_id`, `board_id` | TEXT | origin; no FK (`C-SCHEMA-13`) |
+| `actor`, `actor_type` | TEXT | who asserted this memory, from server identity (`C-AUTH-1`) |
+| `memory_type` | TEXT | the §5.3 enum |
+| `content` | TEXT | 1–2000 chars |
+| `confidence` | REAL | 0.0–1.0 |
+| `tags_json` | TEXT | JSON array |
+| `status` | TEXT | §6.1 |
+| `attempts` | INTEGER | incremented **at claim time**, not at completion, so a crash mid-attempt still counts |
+| `next_attempt_at` | INTEGER ms \| NULL | earliest next claim; `NULL` = immediately claimable |
+| `lease_owner` | TEXT \| NULL | worker id holding the processing lease |
+| `lease_expires_at` | INTEGER ms \| NULL | processing lease expiry (60 s) |
+| `external_id` | TEXT \| NULL | id returned by the adapter on success |
+| `last_error` | TEXT \| NULL | ≤ 500 chars, scrubbed (`C-SCHEMA-16`) |
+| `created_at`, `updated_at` | INTEGER ms | server time |
+| `delivered_at` | INTEGER ms \| NULL | set with `succeeded` |
+| `request_id` | TEXT | correlation id from the originating request |
+| `idempotency_key` | TEXT | equal to `id` on creation; kept as a column so the adapter call never has to assume it |
+
+### 6.3 Claiming work and recovering stuck workers
+
+```sql
+-- one statement; a worker claims at most one row per call
+UPDATE outbox
+   SET status = 'processing',
+       lease_owner = :worker_id,
+       lease_expires_at = :now_ms + 60000,
+       attempts = attempts + 1,
+       updated_at = :now_ms
+ WHERE id = (
+   SELECT id FROM outbox
+    WHERE ( (status IN ('pending','retryable','uncertain')
+             AND (next_attempt_at IS NULL OR next_attempt_at <= :now_ms))
+         OR (status = 'processing' AND lease_expires_at <= :now_ms) )
+    ORDER BY created_at ASC, id ASC
+    LIMIT 1)
+RETURNING id, ticket_id, handoff_id, actor, actor_type, memory_type,
+          content, confidence, tags_json, attempts, idempotency_key;
+```
+
+| ID | Rule |
+|---|---|
+| `C-OUTBOX-5` | A `processing` row whose lease expired is **reclaimable by any worker** — that is the stuck-worker recovery, and it needs no separate reaper process. |
+| `C-OUTBOX-6` | Reclaiming an expired `processing` row first sets it to **`uncertain`** (in the same transaction as the claim, or in a one-statement pre-pass `UPDATE ... SET status='uncertain' WHERE status='processing' AND lease_expires_at <= :now_ms`), because the previous worker may have delivered before dying. `[LEAD-DECIDED]` — `attempts` is already ≥ 1 by definition, so "unknown" is the only honest label. |
+| `C-OUTBOX-7` | A worker whose ack affects 0 rows (its lease was stolen or expired) must **not** report success to anyone and must not write `external_id`. The row belongs to whoever holds the lease now. |
+
+### 6.4 Delivery semantics
+
+| ID | Rule |
+|---|---|
+| `C-OUTBOX-8` | Delivery is **at-least-once**. A write may reach the operator's memory more than once. Correctness therefore rests on the stable `id` being passed as the adapter idempotency key (`C-IDEM-5`) and on the adapter deduplicating by it. The README and `/docs` must say this in one sentence. |
+| `C-OUTBOX-9` | **Success-then-crash-before-local-ack.** If the adapter accepts the write and the process dies before the `succeeded` update commits, the row is still `processing`. Its lease expires, `C-OUTBOX-6` marks it `uncertain`, and a later worker retries with the same `id`. The far end sees a duplicate it can deduplicate; the board never claims a success it cannot prove. This is the case the spec calls out, and it is why `C-OUTBOX-2` requires the committed local ack, not just the adapter's return value. |
+| `C-OUTBOX-10` | Retry schedule (seconds after the failed attempt): `30, 120, 600, 1800, 7200, 21600, 21600` — `attempts` 1…7 — and **`attempts >= 8` → `failed`**. `next_attempt_at = now_ms + backoff`. A permanent rejection (`adapter_rejected`) goes straight to `failed` regardless of attempts. |
+| `C-OUTBOX-11` | Error classification is explicit, never by string matching (recon §10: driver and adapter errors carry codes, and message text is not stable): the adapter returns a `*DeliveryError{Code, Retryable, Err}`. `Retryable = true` → `retryable`; `Retryable = false` → `failed`; **any error the adapter does not classify, and any timeout or context cancellation after the request was sent, is `uncertain`**. |
+| `C-OUTBOX-12` | No deduplication against the operator's memory is attempted on our side. We do not search before writing: that would be a read-then-write across an external system, and it cannot be made atomic with the write. `[LEAD-DECIDED]` |
+| `C-OUTBOX-13` | `POST /api/v1/outbox/{id}/retry` (human/orchestrator only) resets a `failed` row to `pending` with `attempts = 0`, `next_attempt_at = NULL`, `last_error = NULL`, and audits it. Resetting a `succeeded` row → `409 outbox_not_retryable`. |
+
+### 6.5 `MEMORY_DELIVERY=off|worker`
+
+| ID | Rule |
+|---|---|
+| `C-OUTBOX-14` | `MEMORY_DELIVERY` accepts exactly `off` and `worker`; the default is **`off`** (spec §10). Any other value is a startup error, not a silent fallback. |
+| `C-OUTBOX-15` | With `off`: no worker goroutine starts, **and outbox rows are still created and visible**. Nothing is delivered, nothing is marked `failed`, nothing is dropped. `GET /api/v1/outbox` returns the backlog. |
+| `C-OUTBOX-16` | Switching from `off` to `worker` later delivers the whole backlog in `created_at` order — that is the intended path once the operator's memory server is reachable. No migration or replay command is needed. |
+| `C-OUTBOX-17` | With `worker`: exactly one goroutine loop per process claims one row at a time (the single writer connection serialises anyway), sleeping 1 s when nothing is claimable. A second process on the same database is safe (`C-OUTBOX-5`) but wasteful; the docs say so rather than pretending it is unsupported. |
+| `C-OUTBOX-18` | The worker must never start when the adapter is not configured: `MEMORY_DELIVERY=worker` with no adapter is a **startup error**, because a worker that immediately fails every row would turn a configuration mistake into a pile of dead letters. |
+
+### 6.6 The adapter interface
+
+```go
+// MemoryWrite is one durable assertion the board wants the operator's memory to hold.
+type MemoryWrite struct {
+    ID         string    // stable write id == outbox.id; the adapter idempotency key
+    TicketID   string
+    HandoffID  string
+    Actor      string    // "agent:builder-1"
+    ActorType  string
+    Type       string    // fact|decision|requirement|finding|preference|continuation|lesson
+    Content    string
+    Confidence float64
+    Tags       []string
+    CreatedAt  time.Time // UTC
+}
+
+type MemoryRecord struct {
+    ExternalID string
+    Type       string
+    Content    string
+    Confidence float64
+    Tags       []string
+    CreatedAt  time.Time
+}
+
+// Adapter is the only thing the outbox worker knows about the outside world.
+type Adapter interface {
+    // Write must be idempotent on w.ID: a repeated Write with the same ID must
+    // return the same ExternalID, not create a second record.
+    Write(ctx context.Context, w MemoryWrite) (externalID string, err error)
+    Get(ctx context.Context, externalID string) (MemoryRecord, error)
+}
+
+// Searcher is OPTIONAL. Implementations that cannot search simply do not implement it.
+type Searcher interface {
+    Search(ctx context.Context, query string, limit int) ([]MemoryRecord, error)
+}
+
+type DeliveryError struct {
+    Code      string // adapter_unavailable | adapter_timeout | adapter_rejected | adapter_not_configured
+    Retryable bool
+    Err       error
+}
+```
+
+| ID | Rule |
+|---|---|
+| `C-OUTBOX-19` | `Write` and `Get` are required; `Search` is optional and detected by a type assertion to `Searcher` at wiring time, once, not per call. |
+| `C-OUTBOX-20` | **Documented fallback when `Search` is missing:** the search operation returns `501 search_unsupported` with `details.reason = "adapter_has_no_search"` and `details.fallback = "use memory_refs in handoffs"`. It must **never** return an empty list, because an empty list is indistinguishable from "no results" and would make an agent believe knowledge does not exist. The agent-facing documentation says: when search is unsupported, use `memory_refs` from the latest handoff and re-derive. |
+| `C-OUTBOX-21` | The mock adapter (Phase 5) implements all three and records calls in memory; the real operator-memory adapter is blocked until the Python MCP server is reachable (see `recon.md` §9/§12 and the business plan's "Blocked externally"). The outbox contract does not change when it arrives. |
+| `C-OUTBOX-22` | The adapter never sees the SQLite database, the ticket row, or anything not in `MemoryWrite` — so a future out-of-process adapter (an MCP client to the operator's memory server) is a drop-in. |
+
+### 6.7 Observability
+
+| ID | Rule |
+|---|---|
+| `C-OUTBOX-23` | `GET /api/v1/outbox?status=&ticket_id=&limit=&offset=` returns outbox rows newest-first, with counts per status in a sibling endpoint `GET /api/v1/outbox/summary`. Both are `human`/`orchestrator` readable; an `agent` may read only rows for tickets it currently holds. `[LEAD-DECIDED]` — the backlog is operational state, not ticket content. |
+| `C-OUTBOX-24` | Every delivery transition writes exactly one audit row on the ticket (`memory_delivered` / `memory_delivery_failed`, §1.8). Retries within `retryable` do not write one per attempt — the attempt counter is the record; only terminal transitions are audited, so a flapping adapter cannot flood the timeline. |
+
+---
+
+## 7. Error codes
+
+### 7.1 One enum, two representations
+
+| ID | Rule |
+|---|---|
+| `C-ERR-1` | There is exactly **one** error type in the service layer: `Error{Code Code, Message string, Details map[string]any, RequestID string}`. Both transports render it from one mapping table. A handler never invents an error code and never maps a status itself. |
+| `C-ERR-2` | `Code` is a closed enum (§7.3). Adding a code is a contract change; a code string that is not in the table is a defect, and the renderer maps it to `internal` while logging loudly. |
+| `C-ERR-3` | REST renders: `Content-Type: application/json; charset=utf-8`, body = the JSON object in §7.2. `[LEAD-DECIDED]` — the body has always been JSON; it was served as `text/plain` only because the code used `http.Error`. Clients that parse the body are unaffected; clients that never parse it are unaffected. |
+| `C-ERR-4` | Ownership-conflict details **must** carry, when known: `ticket_id`, `status`, `version`, `holder`, `holder_type`, `lease_expires_at`, `lease_generation`, `reason`. `holder` is an actor id (`agent:builder-1`), never a token. `lease_generation` is included: it is not a secret and is useless without the matching holder (`C-FENCE-1`). |
+| `C-ERR-5` | No error ever contains a credential, a token, an adapter URL with userinfo, or a raw driver error string. An unexpected internal error renders as `{"error_code":"internal","error":"internal server error"}` with the real error logged server-side and the `request_id` in both places so the log and the response can be joined. |
+| `C-ERR-6` | An unknown internal error is `500 internal`, never a leak of `err.Error()`. This is already upstream behaviour (recon §4.1) and is preserved. |
+| `C-ERR-7` | `database_busy` is `503` with `Retry-After: 1` and is the only code that is safe to retry blindly. Recon §4.5 measured `SQLITE_BUSY` surfacing as a silent 500; after the DSN fix (`C-CONV-9`) it should be unreachable, so if it appears it is a real signal, not noise. |
+
+### 7.2 REST body
+
+```json
+{
+  "error": "ticket 83f6… is held by agent:builder-1 until 2026-10-30T23:23:22.180Z",
+  "error_code": "already_claimed",
+  "details": {
+    "ticket_id": "83f681a8a8864a1cbe1deff69e6570e9",
+    "status": "in_progress",
+    "version": 12,
+    "holder": "agent:builder-1",
+    "holder_type": "agent",
+    "lease_expires_at": "2026-10-30T23:23:22.180Z",
+    "lease_generation": 4,
+    "reason": "lease_active"
+  },
+  "request_id": "req_01J9X8Z4QK"
+}
+```
+
+| ID | Rule |
+|---|---|
+| `C-ERR-8` | `error` is preserved verbatim in shape — a human sentence, same key, same meaning. Old clients keep working (`C-COMPAT-1`). `error_code`, `details` and `request_id` are additive; `details` is omitted when empty, `request_id` is always present (generated when the caller sent none). |
+| `C-ERR-9` | Warnings (unknown fields, deprecated fields) are **not** errors: they are `200` responses with a `warnings: ["unknown field \"lease_expires_at\" ignored"]` array (`C-COMPAT-5`). |
+
+### 7.3 MCP representation
+
+```json
+{
+  "jsonrpc": "2.0", "id": 3,
+  "result": {
+    "content": [
+      {"type": "text", "text": "already_claimed: ticket 83f6… is held by agent:builder-1 until 2026-10-30T23:23:22.180Z"},
+      {"type": "text", "text": "{\"error_code\":\"already_claimed\",\"error\":\"ticket 83f6… is held by …\",\"details\":{…},\"request_id\":\"req_01J9X8Z4QK\"}"}
+    ],
+    "structuredContent": {"error": {"code": "already_claimed", "message": "…", "details": {…}, "request_id": "req_01J9X8Z4QK"}},
+    "isError": true
+  }
+}
+```
+
+| ID | Rule |
+|---|---|
+| `C-ERR-10` | Business failures stay **tool-level** results with `isError: true` — never JSON-RPC protocol errors. That is upstream behaviour (recon §3) and clients depend on it. |
+| `C-ERR-11` | The first text block is always `<code>: <message>`, so a client that only reads prose gets a stable, machine-matchable prefix (today it gets prose only — recon §3). The second text block is the full JSON object, so the code and details are readable even if the SDK drops `structuredContent` on error results. |
+| `C-ERR-12` | `structuredContent.error` is the same object as the second text block. If `mcp-go` refuses `structuredContent` on an `isError` result, Phase 3 records that in the PR and the second text block remains the contract. The two text blocks are mandatory either way, so no client is left without a machine-readable code. |
+| `C-ERR-13` | Success results are unchanged: bare object for object results, `{"items": [...]}` for lists (recon §3). Only the error path gains structure. |
+
+### 7.4 The code table (normative)
+
+| `error_code` | REST | When | Required `details` |
+|---|---|---|---|
+| `invalid_request` | 400 | malformed JSON, missing required field, bad enum, bad key format | `field` |
+| `unknown_field` | 400 | unknown JSON field **in strict mode** (`C-COMPAT-5`) | `fields[]` |
+| `not_found` | 404 | entity absent; also `claim_next` with nothing claimable | `ticket_id` / `board_id` / `handoff_id` / `reason` |
+| `forbidden` | 403 | actor type may not perform the operation (`C-AUTH-4`) | `actor_type`, `operation` |
+| `unauthorized` | 401 | **reserved** for the deferred remote-auth phase; never emitted in v1 | — |
+| `already_claimed` | 409 | a live lease is held by another actor | `C-ERR-4` set + `override_required:true` on `reassign` |
+| `not_claimed` | 409 | `revoke` with nothing to revoke | `ticket_id` |
+| `not_claim_holder` | 409 | caller is not the current holder | `ticket_id`, `holder`, `holder_type` |
+| `lease_expired` | 409 | caller was the holder but the lease lapsed | `ticket_id`, `lease_expires_at`, `lease_generation` |
+| `lease_generation_mismatch` | 409 | fencing token stale | `ticket_id`, `expected_generation`, `current_generation` |
+| `version_conflict` | 409 | `expected_version` stale | `ticket_id`, `expected_version`, `current_version` |
+| `status_not_claimable` | 409 | claim on `done`/`blocked`/non-claimable status | `ticket_id`, `status`, `claimable_statuses[]` |
+| `dependency_blocked` | 409 | unfinished `blocks` dependency | `ticket_id`, `blocking_ticket_ids[]`, `blocking_statuses[]` |
+| `idempotency_conflict` | 409 | same key, different payload | `operation`, `key`, `request_hash` |
+| `idempotency_in_progress` | 409 | **reserved**; only for a future multi-process deployment (`C-IDEM-15`) | `operation`, `key` |
+| `handoff_invalid` | 400 | schema violation, oversize document, bad enum/confidence | `field`, `reason` |
+| `handoff_not_acceptable` | 409 | handoff not `offered`, or addressed to someone else | `handoff_id`, `status`, `to_actor` |
+| `outbox_not_retryable` | 409 | retry of a `succeeded` row | `outbox_id`, `status` |
+| `memory_delivery_disabled` | 409 | delivery requested while `MEMORY_DELIVERY=off` | `memory_delivery` |
+| `search_unsupported` | 501 | adapter has no `Search` (`C-OUTBOX-20`) | `reason`, `fallback` |
+| `payload_too_large` | 413 | **not used in v1** — reserved; an oversize handoff is `400 handoff_invalid` so one field has one failure mode (`C-HANDOFF-2`) | `max_bytes` |
+| `rate_limited` | 429 | **reserved** for the deferred remote phase | `retry_after_ms` |
+| `database_busy` | 503 | write lock not acquired within `busy_timeout` | `retry_after_ms` |
+| `internal` | 500 | anything unexpected | — |
+
+| ID | Rule |
+|---|---|
+| `C-ERR-14` | `409` is the status for **every** ownership conflict (spec §5.6), and the code distinguishes the cause. A client that only knows "409 means someone else has it" still behaves correctly; a client that reads `error_code` can do better. |
+| `C-ERR-15` | A 404 is never used to signal a conflict and a 409 is never used to signal absence. The diagnosis order in `C-CLAIM-22` is what guarantees this. |
+
+---
+
+## 8. Authorization matrix
+
+### 8.1 Actor types and where identity comes from
+
+| ID | Rule |
+|---|---|
+| `C-AUTH-1` | There are exactly four actor types: **`human`**, **`agent`**, **`orchestrator`**, **`system`**. Identity is always server-derived — from trusted local configuration or a session, never from a request body (`C-FENCE-12`). |
+| `C-AUTH-2` | Identity has two parts: `actor_type` (above) and `actor_id` (a string matching `[A-Za-z0-9._:-]{1,200}`, e.g. `builder-1`). Together they render as `type:id` in `lease_holder`, `ticket_events.actor` and `handoffs.from_actor`. |
+| `C-AUTH-3` | v1 sources, in precedence order: (1) **MCP stdio** — the process configuration (`LEDGERBOARD_ACTOR_TYPE`, `LEDGERBOARD_ACTOR`), because one stdio process is one agent; (2) **MCP HTTP** — the `X-Ledgerboard-Actor-Type` / `X-Ledgerboard-Actor` headers presented at `initialize`, fixed for the session; (3) **REST** — the same headers per request; (4) fallback — the process defaults `agent:local` / type `agent`. |
+| `C-AUTH-4` | Trusting those headers is gated: `LEDGERBOARD_TRUST_ACTOR_HEADER` defaults to **on when the listener is bound to a loopback address** and **off otherwise**. With it off, the headers are ignored and the process default is used. `--trust-actor-header` on a non-loopback bind requires `--allow-remote-unauthenticated`, which prints a startup warning. `[LEAD-DECIDED]` — spec §13 allows "trusted local config"; a loopback-only header is exactly that, and the spec's §19 localhost default makes it safe by construction. |
+| `C-AUTH-5` | **v1 is a trusted-local boundary, not a security boundary.** Any local process that can open a socket to a loopback-bound server can present any actor type. This is stated plainly here and in the README; it is not a bug to be discovered later. Recon D9 is the reason: upstream has no identity at all, so every rule below is an honour system that becomes enforceable when the deferred scopes arrive. |
+| `C-AUTH-6` | `system` is never accepted from a client header. It is only used by in-process code (the expiry sweeper, the outbox worker, migrations). A client presenting `system` → `403 forbidden`. |
+
+### 8.2 What each actor may do
+
+| Operation | `human` | `agent` | `orchestrator` | `system` |
+|---|---|---|---|---|
+| Read anything (boards, tickets, handoffs, audit, outbox summary) | yes | yes | yes | yes |
+| Create / edit / delete boards, epics | yes | no | yes | no |
+| Create tickets (single, bulk) | yes | yes | yes | no |
+| **Claim a ticket** | **no** (`403`) | yes | yes | internal only |
+| Renew / release own claim | n/a | yes | yes | no |
+| Edit ticket content / status / tasks / notes / relations | yes, unfenced | yes, **fenced** (`C-FENCE-2`) | yes, unfenced | no |
+| Create a handoff | yes | yes, fenced | yes | no |
+| Accept a handoff | yes | yes (if addressed or `to_actor` null) | yes | no |
+| **Reassign** a ticket (override a live claim) | yes | **no** (`403`) | yes | no |
+| **Revoke** a claim | yes | **no** (`403`) | yes | no |
+| **Unblock** a ticket | yes | **no** (`403`) | yes | no |
+| Read the outbox | yes | only rows for tickets it holds | yes | yes |
+| Retry a dead-lettered memory write | yes | no | yes | no |
+| Change `MEMORY_DELIVERY` | no (config only) | no | no | no |
+
+| ID | Rule |
+|---|---|
+| `C-AUTH-7` | The four "no" cells for `agent` are the whole point of the actor types: an agent cannot give itself a ticket it did not win, cannot clear a claim that is not its own, and cannot unblock work a human blocked. Each is a `403 forbidden` — a *capability* failure — never a 409. |
+| `C-AUTH-8` | `orchestrator` is a human-equivalent for overrides (it is the human's fleet controller) but is **fenced** on content writes if it also holds the lease; it may hold a lease like an agent. `[LEAD-DECIDED]` — spec §13 lists orchestrator alongside agent for claim-like behaviour and alongside human for override behaviour; this is the smallest reading that satisfies both. |
+| `C-AUTH-9` | An `agent` may create tickets (that is how a fleet files follow-up work) but may not create boards or epics (structure stays human). `[LEAD-DECIDED]` — the alternative (agents create boards) has no user, and a board is the operator's organisational unit. |
+
+### 8.3 Human override versus agent action
+
+| ID | Rule |
+|---|---|
+| `C-AUTH-10` | The distinction is exactly `actor_type` on the request identity plus the capability table. A `human` override on a claimed ticket is audited as `claim_reassigned` / `claim_released` / `claim_revoked` with `override:true` and `actor` = `human:<id>`; an agent's own release is the same event type with `reason:"release"` and `override` absent. The audit trail therefore answers "who" for the first time (recon §5.1: `actor` was always `''`). |
+| `C-AUTH-11` | "Agents cannot impersonate humans" (spec §5.5) is enforced by `C-AUTH-1`/`C-AUTH-6`: there is no request field that sets the actor type, and `system` is rejected outright. Under v1's trusted-local model this prevents mistakes and sloppy clients, not a determined local attacker (`C-AUTH-5`). |
+| `C-AUTH-12` | The existing `assignee` field is **not** an identity: it stays free text, writable by anyone, and never grants or revokes authority (`C-SCHEMA-5`). The UI may display the claimant next to the assignee label, but the two are never conflated. |
+
+### 8.4 Where the deferred scopes slot in
+
+The spec defers remote auth scopes to a later phase. This is the mapping they must use, so that nothing
+has to be re-cut later:
+
+| Scope | Operations |
+|---|---|
+| `read` | every `GET`, MCP `list`/`get`/`history`/`context`/`ready`/`summary`/`latest` |
+| `write` | ticket/epic/board/task/note/relation mutations, handoff create, memory-write submit |
+| `claim` | `claim`, `claim_next`, `renew`, `release`, handoff accept |
+| `admin` | `reassign`, `revoke`, `unblock`, outbox retry, outbox inspection, config |
+
+| ID | Rule |
+|---|---|
+| `C-AUTH-13` | The capability table in §8.2 is expressed in terms of these four scopes internally from day one (`human` ⇒ read+write+claim+admin, `agent` ⇒ read+write+claim, `orchestrator` ⇒ all four, `system` ⇒ all four but not over a transport), so the deferred work is "populate the scope from a credential" and not "rewrite the authorization". |
+| `C-AUTH-14` | When remote auth lands, `unauthorized` (401) and `rate_limited` (429) become reachable and no other code changes. They are reserved now so that the enum is stable. |
+
+---
+
+## 9. Compatibility rules
+
+Each rule is a testable promise. "Old client" means any client written against upstream `c6938a2`
+(recon §3, §4); "old database" means a database migrated only to `0001`.
+
+| ID | Promise | Test |
+|---|---|---|
+| `C-COMPAT-1` | **No envelope.** Success bodies stay bare objects and bare arrays. `GET /api/v1/boards` returns `[...]`, `POST /api/v1/boards` returns the board object, not `{ok, data}`. New fields may be added; existing keys keep their names and types. | Create a board with an old-style body; assert the response has `id`/`name`/`description`/`created_at`/`updated_at` at the top level and no `ok`/`data` keys. |
+| `C-COMPAT-2` | **`in_progress` stays the wire value.** `{"status":"in_progress"}` → 200; `{"status":"in progress"}` → 400 with `status must be one of: todo, in_progress, done, blocked` (unchanged message). The UI continues to display "In Progress". | Both requests, assert 200 and 400 respectively; grep the frontend column labels. |
+| `C-COMPAT-3` | **Unknown fields warn by default.** A body with an unknown field is accepted, the field is ignored, and the response carries `warnings: ["unknown field \"lease_expires_at\" ignored"]`. Under strict mode (`LEDGERBOARD_STRICT_JSON=1` or `X-Ledgerboard-Strict: 1`) the same request is `400 unknown_field` with `details.fields`. Recon §4.2 shows today's silent drop; the warning is the additive fix. | `PUT /tickets/{id}` with `{"lease_expires_at": …, "title": "x"}` → 200 + warning (default) and 400 (strict). |
+| `C-COMPAT-4` | **Old databases keep working, in place.** A database at `0001` migrates on open to `0002` with no data change beyond column defaults; a second open is a no-op; `foreign_key_check` is clean afterwards. | Copy a `0001` database, open, assert `schema_migrations` version 2, `version=1`/`lease_generation=0` on every pre-existing ticket, `foreign_key_check` empty, second open clean. |
+| `C-COMPAT-5` | **Old binaries keep working against a new database.** `0002` only adds nullable-or-defaulted columns and new tables, so an upstream binary's `INSERT`/`UPDATE` (which name their columns) still succeeds and its reads ignore the new columns. | Run the upstream binary against a `0002` database; create and update a ticket; assert 2xx. (This is the strongest test that the migration is genuinely additive.) |
+| `C-COMPAT-6` | **Timestamps stop changing shape.** `created_at`/`updated_at` are serialized from the stored value, so the create response and a subsequent `GET` return the **same string**. Today they disagree — create echoes nanoseconds, reads return seconds (recon R6). `[LEAD-DECIDED]` — this is a bug fix, and no client can depend on the same object having two formats. | Create a ticket, capture `created_at`, `GET` it, assert byte equality. |
+| `C-COMPAT-7` | **SSE keeps its shape.** Event name stays `board_change`, payload keeps `type` and `board_id`. New keys (`ticket_id`, `actor`, `version`) may be added; existing clients that read only `board_id` (the bundled UI does exactly that, recon §4.8) are unaffected. | Subscribe, mutate, assert `event: board_change` and that `board_id` is present and correct. |
+| `C-COMPAT-8` | **SSE is published from the service layer**, so a mutation made over MCP now emits an event (recon §5.2: today MCP emits nothing). This is additive in the sense that clients receive *more* events for the same board; the UI's cache-invalidation behaviour is unaffected. Publishing happens after commit, never before. | Perform the same mutation over REST and over MCP; assert both produce one `board_change` for the board. |
+| `C-COMPAT-9` | **The six existing MCP tools keep their names, actions and argument names** (recon §3). New capabilities arrive as new tools (`claim`, `handoff`, `memory`) and new optional arguments; no existing action is renamed or removed. `tools/list` annotations are corrected to truthful `readOnlyHint`/`destructiveHint` values, which is strictly more permissive than the current all-destructive advertisement. | `tools/list` contains the six original tools with unchanged `inputSchema` required fields; a scripted call to each original action still works. |
+| `C-COMPAT-10` | **Error bodies keep `error`.** Every error response still has a top-level `error` string with the same meaning as before; `error_code`, `details`, `request_id` are additive (`C-ERR-8`). | Assert `error` present and a string on 400/404/409/500. |
+| `C-COMPAT-11` | **Default bind is `127.0.0.1`** (spec §19), with `--host`/`KANBAN_HOST` to opt back into `0.0.0.0`. This is a deliberate behaviour change from upstream's `:port` (recon §4.9), required by the spec and documented in the README's breaking-changes section. | Start with no flags, assert the listener is on loopback only; start with `--host 0.0.0.0`, assert all interfaces. |
+| `C-COMPAT-12` | **Legacy rows with values the Go enums do not know are readable but not writable.** A ticket whose `status` is anything other than the four known values is returned as-is (the UI renders the raw string) and any attempt to write an unknown status is rejected. Recon G17: the database has never enforced enums and existing rows must not break the server. | Insert a ticket with `status='weird'` directly, `GET` → 200, `PUT {"status":"weird"}` → 400. |
+
+| ID | Rule |
+|---|---|
+| `C-COMPAT-13` | These twelve promises are the *whole* compatibility contract. Anything not listed here is free to change; anything listed here needs a contract revision and a note in the README's breaking-changes section to change. |
+
+---
+
+## 10. Decisions the owner must make
+
+Three items are genuinely the owner's. Nothing else in this document waits on them.
+
+### `[OWNER-1]` — does a human content edit revoke an agent's claim?
+
+Spec §5.5 lists "content edit" among the human overrides that "invalidate prior claim authority". Read
+literally, a human fixing a typo in a claimed ticket's description would end the agent's ownership.
+
+- **Option A (contracted, `C-FENCE-11`):** a human content edit bumps `version` only. The agent's lease
+  survives; its next write fails with `version_conflict` and it re-reads. Ownership-bearing overrides
+  (reassign, release, revoke, status to/from done or blocked, unblock) do bump the generation.
+- **Option B (literal §5.5):** any human edit of a claimed ticket ends the claim, issuing a new generation.
+
+Option A is implemented unless the owner says otherwise; switching to B is a one-row change in the
+override classification table, not a redesign. The cost of B is that the live UI becomes hostile to
+agents: every human keystroke on a claimed ticket kicks the agent off mid-task.
+
+### `[OWNER-2]` — handoff retention
+
+Handoffs are immutable and are never deleted (`C-HANDOFF-10`). A long-lived board therefore grows without
+bound: each handoff is up to 64 KiB.
+
+- **Option A:** keep everything forever. Simplest, best audit trail, unbounded growth (a busy board with
+  10 handoffs/day is ~230 MB/year at the cap, far less in practice).
+- **Option B:** prune superseded handoffs older than N days, keeping the latest per ticket. Bounds growth;
+  destroys history; needs an export first to avoid silent data loss.
+- **Option C:** no pruning in v1, with a documented `VACUUM`/export procedure in the operator docs.
+
+The contract assumes **A/C** (no automatic deletion). Pruning is a data-loss decision, so it is not taken
+here.
+
+### `[OWNER-3]` — upstream license (inherited from recon §9, not new)
+
+Upstream `rgracey/kanban-mcp` has **no license file** — all rights reserved. Engineering can continue on
+the fork, but a modified redistribution or a shipped binary needs upstream's permission. This does not
+block Phase 2 or Phase 3; it blocks publishing. Re-stated here because this contract is the first
+document that describes the product as shippable.
+
+---
+
+## 11. What this contract deliberately does not decide
+
+- **Remote auth, TLS and scopes** — deferred; §8.4 is the slot they fill (`C-AUTH-13`).
+- **Multi-process claim tests, crash boundaries, migration torture** — `docs/test-plan.md` (deliverable 2
+  of Phase 1) turns each rule here into a test, including the five crash boundaries.
+- **UI presentation** — Phase 4. The contract fixes the data (claimant, expiry, generation, outbox
+  status, attribution) and nothing about how it looks.
+- **The operator's memory integration** — blocked externally; the adapter interface (`C-OUTBOX-19`) and
+  the mock are the whole v1 surface.
+- **Rate limiting, pagination beyond handoffs, search** — not in v1; no rule here forbids them later.
