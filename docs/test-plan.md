@@ -388,3 +388,228 @@ Detailed fixture and kill design in §4.
 |---|---|---|---|---|---|---|
 | T-E2E-01 five-agent full scenario | everything below cites: `C-CLAIM-5`, `C-CLAIM-12`, `C-CLAIM-14`, `C-CLAIM-15`, `C-FENCE-9`, `C-GUARD-7`, `C-GUARD-9`, `C-CLAIM-2`, `C-HANDOFF-16`, `C-HANDOFF-17`, `C-OUTBOX-15`, `C-OUTBOX-8`, `C-AUTH-10`, `C-AUDIT-7`, `C-COMPAT-8`, `C-ERR-4` | the §21 script (A1–A5 agents as separate processes; A4+A5 over stdio MCP servers as separate processes; H human; one SQLite file): (1) A1 claims T1 → holder, gen g1; (2) A2–A5 race `claim_next` over exactly 4 claimable tickets → 4 × 200 distinct tickets, no ticket double-held; (3) memory outage: mock `retryable`, `MEMORY_DELIVERY=worker` — A1 creates a handoff on T1 with 3 memory writes → 200; outbox rows go pending→retryable; **board keeps working** (A3 notes on T1 — open op); (4) H reassigns T1 → A1 itself with `override:true` → gen g1+1; (5) **stale write rejection:** A1's edit with generation g1 → `409 lease_generation_mismatch` (expected g1, current g1+1) — the reachable stale path per T-CLAIM-14; A2's edit on A1's live T1 → `409 already_claimed` with A1's details; (6) A2's ticket: fake clock past TTL → A3 claims it; A2's renew → `409 lease_expired`; (7) A4 marks its ticket `blocked` (own claim ends per `C-GUARD-9`); A5's claim → `409 status_not_claimable`; H unblocks → audited `unblocked`; A5 claims → 200; (8) A3 creates offered handoff on its ticket addressed to A5; A5 accepts → holder transfer, generation +1; A3's renew → `409 not_claim_holder`; (9) outage ends: mock `ok` → backlog delivers in `created_at` order, all rows `succeeded`, `calls.jsonl` shows duplicated ids sharing external ids (at-least-once + dedup, `C-OUTBOX-8`); (10) T1's audit timeline reads in `created_at ASC, rowid ASC` order and every row names its actor; SSE delivered ≥1 `board_change` per mutation across both REST and MCP. **Every step's assertion is checked inline by the agents (`expect`) and again by the controller against the DB** | `E2E` — the only level where the whole contract acts at once | fake clock file shared by all three server processes; barriers at (2) and (5); FIFOs for outbox; no sleeps | `phase-7/T-E2E-01/` (per-agent transcripts, server log, final dump, SSE capture, audit extract) | 7 |
 | T-E2E-02 sustained fleet day | `C-CLAIM-19`, `C-CLAIM-20`, `C-CLAIM-21`, `C-IDEM-16`, `C-OUTBOX-16` | 5 agents, 30 tickets, simulated workday compressed by the fake clock: claims, renewals at 50 % TTL (`C-CLAIM-14` guidance), expiries with re-claims, 10 handoffs, one idempotency-key replay burst, purge at the 72 h mark, sweeper running continuously (interval knob): final state satisfies every `C-INV-*` invariant; no 500 anywhere in any transcript; generation/version counters consistent with the event log | `E2E` | seeded schedule; fake clock | `phase-7/T-E2E-02/` | 7 |
+
+---
+
+## 3. Crash-boundary matrix
+
+The owner's five boundaries, each with the exact kill point (a named crashpoint per §1.4, or the
+migration watcher landmarks per §4.3), what must survive, what must be recoverable on restart, and the
+contract rule that defines the required behaviour. Kill is always SIGKILL issued by the hook itself
+after its marker is fsynced — no deferred code runs. Every row is exercised 20× (bounded, seeded) to
+distinguish "handles crash" from "handles one lucky crash".
+
+| # | Boundary (owner's words) | Exact kill point(s) | Must survive the crash | Must be recoverable on restart | Rules | Test |
+|---|---|---|---|---|---|---|
+| a | "after claim row written, before audit/SSE" | `claim.pre_commit` — inside the `BEGIN IMMEDIATE`, after the claim `UPDATE` reports `RowsAffected()==1`, **before `COMMIT`**. (Under `C-AUDIT-4` the audit row is inside the same transaction, so this *is* the last moment a claim can exist without its audit; the complementary `claim.post_commit` is the second point.) | pre-commit: nothing — SQLite rolls the whole transaction back (claim, audit, idempotency key, version bump). post-commit: claim + audit row + idempotency row, committed; the SSE event may be lost (it publishes after commit) — losing the *event* is permitted, losing the *fact* is not | pre-commit: nothing to recover; the retry with the same idempotency key re-executes cleanly and only then does the key row exist (`C-IDEM-13` case a). post-commit: retry replays the stored response byte-identically (`C-IDEM-13` case b) with no second generation bump and no second audit row | `C-CONV-3`, `C-AUDIT-4`, `C-CLAIM-10`, `C-IDEM-12`, `C-IDEM-13`, `C-IDEM-9` | T-CRASH-a |
+| b | "mid-handoff before outbox rows are written" | `handoff.after_handoff_insert` — after the `handoffs` INSERT, before the first outbox INSERT; and `handoff.pre_commit` — after all outbox INSERTs, before `COMMIT` (the complementary window; the contract only knows "all or nothing", so both halves are killed) | nothing: no handoff row, no outbox rows, no `outbox_enqueued` audit, no idempotency key row — one transaction, `C-HANDOFF-14` | the retry with the same key creates handoff + outbox + audit **atomically**; no iteration may leave obligations without a handoff or a handoff without its obligations (`C-IDEM-12` forbids the third state) | `C-HANDOFF-14`, `C-SCHEMA-14`, `C-IDEM-12`, `C-IDEM-13`, `C-AUDIT-4` | T-CRASH-b |
+| c | "after external memory success, before local ack" | `memory.post_adapter_write` — the mock's `Write` returned a non-empty external id, before the `succeeded` UPDATE commits; and `memory.pre_ack_commit` — after the ack UPDATE, before `COMMIT` (same observable state, later window) | the write at the far end — it cannot be rolled back; the outbox row is still `processing` with `attempts` already ≥1 (incremented at claim, §6.2) | the row's 60 s lease lapses (fake clock), the reclaiming worker first marks it `uncertain` (`C-OUTBOX-6`) — never `succeeded` and never silently retried-as-failed — then retries with the **same write id** (`C-IDEM-5`), the far end dedups (mock returns the same external id), and only a **committed** local ack ever produces `succeeded` (`C-OUTBOX-2`). The board never claims a success it cannot prove (`C-OUTBOX-9`); the duplicate is the operator's side's to dedup by id (`C-OUTBOX-8`) | `C-OUTBOX-2`, `C-OUTBOX-3`, `C-OUTBOX-6`, `C-OUTBOX-8`, `C-OUTBOX-9`, `C-IDEM-5`, `C-SCHEMA-14` | T-CRASH-c |
+| d | "during migration" | the DDL landmarks of `0002_lease.up.sql` observed **committed** by a separate `harness-dbproc` watcher (§4.3): after statement k for k ∈ {1, 4, 8, 10, 16, 20} of the 20 contracted statements (8 `ALTER` + 12 `CREATE`); the test SIGKILLs the migrating server at the chosen landmark and records which landmarks were observed | the `0001` data rows — byte-identical across every landmark (column defaults are metadata, not rewrites, `C-SCHEMA-2`); `foreign_key_check` still empty | a **fail-closed** open: the vendored golang-migrate marks the version dirty and the server must refuse to start (never half-serve); recovery is the explicit operator `force`, after which migration completes and the end state is dump-identical to the clean migration of T-MIG-02. A server that starts and serves with missing lease columns is a test failure, not a recovery | `C-SCHEMA-1`, `C-SCHEMA-2`, `C-SCHEMA-3`, `C-COMPAT-4`; §9 G8 proposes the explicit fail-closed rule | T-CRASH-d |
+| e | "while a lease is being renewed" | `renew.pre_commit` — after the renew `UPDATE`, before `COMMIT`; and `renew.post_commit` | pre-commit: nothing — the lease keeps its **original** expiry, generation and renewals (the renewal never happened); post-commit: the extension and the `claim_renewed` audit row, committed together | pre-commit: the same holder+generation can renew again within the original window (`C-CLAIM-14`'s liveness guard is evaluated against real committed state, so the retry succeeds iff the lease is still live); post-commit: state is simply the renewed state; a later holder change still invalidates normally | `C-CONV-3`, `C-AUDIT-4`, `C-INV-2`, `C-CLAIM-14`, `C-FENCE-10` | T-CRASH-e |
+
+Two boundaries deserve their honesty note in the open: **(a)** — as the owner phrased it the boundary
+is only reachable if an implementation writes the audit row *after* commit, which `C-AUDIT-4`
+forbids; the test therefore both (i) proves the transaction boundary SQLite gives us, and (ii) fails
+loudly if Phase 2 ever moves the audit write out of the transaction. **(d)** — the migration runner
+is vendored code and cannot host hooks; the watcher-landmark construction (§4.3) names the steps by
+*observed committed DDL*, which is the step boundary that actually exists at the storage engine.
+
+---
+
+## 4. Migration test design
+
+### 4.1 Building a genuinely upstream-populated database
+
+```sh
+# 1. upstream code at the pinned fork point, built outside the shared tree
+git -C /home/team/shared/ledgerboard worktree add /tmp/lb-upstream c6938a2e6e0f3b2aca6cebf4afd93babd94d8317
+cd /tmp/lb-upstream && CGO_ENABLED=0 go build -o /tmp/lb-scratch/bin/kanban-upstream .
+
+# 2. populate via upstream's own REST (its behaviour, its audit rows, its shapes)
+rm -f /tmp/lb-scratch/mig.db*
+/tmp/lb-scratch/bin/kanban-upstream -port 0 -db /tmp/lb-scratch/mig.db -mcp-transport http &
+# population script (deterministic, fixed ids recorded in evidence):
+#   3 boards, 3 epics, 40 tickets covering all 4 statuses x all 4 priorities,
+#     assignee set on 12, resolution{commit_sha,pr_url,notes} set on 5,
+#     descriptions incl. unicode and empty strings
+#   25 notes (some edited), 30 tasks (mixed done/undone, positions shuffled),
+#   10 relations kind='blocks' incl. one 2-cycle and one blocked→done edge,
+#   natural ticket_events from every mutation above (~120 rows, actor='')
+#   backdated created_at on 6 tickets; 2 pairs of rows sharing identical created_at
+#     seconds (the recon §4.6 tie case)
+# 3. direct-SQL oddities a real board can contain (harness-dbproc, production DSN):
+#   one ticket status='weird' (C-COMPAT-12), one note with embedded NUL-free control
+#   chars, one ticket with priority='high' but status='done'
+# 4. snapshot: harness-dbproc dump of all 0001 tables ordered by rowid -> before.json
+```
+
+Every population step is scripted and its ids recorded — the fixture is reproducible, not harvested.
+Scratch DBs live in `/tmp/lb-scratch/`; the *script* and the dumps are the committed evidence.
+
+### 4.2 Migrate and prove
+
+```sh
+cp /tmp/lb-scratch/mig.db /tmp/lb-scratch/mig-run.db
+CGO_ENABLED=0 go build -o /tmp/lb-scratch/bin/ledgerboard .   # new binary, 0002 embedded
+/tmp/lb-scratch/bin/ledgerboard -port 0 -db /tmp/lb-scratch/mig-run.db -mcp-transport http &
+```
+
+Assertions (T-MIG-02/03/06, executed by the harness, not by hand): `schema_migrations` dirty=false,
+version=2; `sqlite_master` diff vs allowlist (`C-SCHEMA-1`); all `0001` tables dump-identical to
+`before.json`; every old ticket `version=1, lease_generation=0`, lease columns NULL (`C-SCHEMA-2`);
+`foreign_key_check` → empty; REST and MCP regression suites re-run against this DB (T-MIG-03) —
+including fetching a pre-migration ticket by original id and walking a pre-migration relation both
+ways; five open/migrate cycles change nothing further (T-MIG-06).
+
+### 4.3 Crash during migration (T-CRASH-d)
+
+The migrating server is started against a *copy* of the fixture. A separate `harness-dbproc` watcher
+loops `PRAGMA table_info(tickets)` (tight loop, no sleep) until the `k`-th contracted statement's
+effect is visible (`version` column for k=1; `handoff_id` for k=8; the `handoffs` table for k=10;
+`outbox` for k≈13; `idempotency_keys` for k≈19), then the controller SIGKILLs the server. Landmarks
+are per-statement because each DDL statement commits individually; the loop re-runs a landmark if the
+server raced past it before the kill landed, bounded by the 20-statement count — determinism comes
+from *which* landmark was reached (recorded), and every reached landmark asserts the same recovery
+contract. On restart: open must fail closed on the dirty version (server exits non-zero with the
+dirty-migration error; a probe HTTP call is refused). After the explicit operator
+`force` (documented command), migration completes; the final `sqlite_master` and data dumps must be
+**identical** to T-MIG-02's clean-migration result, and `foreign_key_check` is empty. What may never
+happen: a server that starts and serves requests against a partially-migrated file.
+
+### 4.4 Down-migration round trip (T-MIG-04)
+
+Explicit `Down` via the migrate CLI path (never automatic — `C-SCHEMA-4`): tickets returns to its 11
+original columns; indexes and tables dropped in the contracted order (indexes first, `C-SCHEMA-7`);
+`foreign_key_check` empty on the down state; then `Up` again → defaults re-applied, `0001` data still
+dump-identical. The evidence header states the contracted loss: lease/handoff/outbox rows are
+destroyed by design, and the down migration is never invoked automatically.
+
+---
+
+## 5. Quality-gate commands
+
+Run from the repo root. Pass criteria are part of the gate, not commentary.
+
+| Gate | Command | Pass criteria |
+|---|---|---|
+| Format | `test -z "$(gofmt -l .)" && echo FMT-OK` | prints `FMT-OK` (empty list) |
+| Vet | `go vet ./...` | exit 0, no output |
+| Tests | `go test ./... -count=1` | exit 0; every package `ok`; upstream 31 tests green unmodified (T-REG-01) |
+| Race | `CGO_ENABLED=1 go test -race ./... -count=1` | exit 0. recon §10: `-race` requires cgo — this gate is never run in a `CGO_ENABLED=0` job; the shipped binary gate below is the one that is `CGO_ENABLED=0` |
+| Frontend build (only if `git diff --name-only <merge-base>...HEAD -- frontend/` is non-empty) | `rm -rf /tmp/lb-fe && cp -r frontend /tmp/lb-fe && cd /tmp/lb-fe && npm ci --cache /var/npmcache && npm run build && cp -r dist /home/team/shared/ledgerboard/frontend/` | build exit 0; `frontend/dist` regenerated; binary rebuilt (embeds dist). `node_modules` never exists under `/home` (~100 MB free — baseline §2) |
+| Clean binary | `CGO_ENABLED=0 go build -trimpath -o /tmp/lb-scratch/kanban-mcp . && /tmp/lb-scratch/kanban-mcp -port 0 -db /tmp/lb-scratch/smoke.db &` then `curl -sf http://127.0.0.1:$PORT/api/v1/boards` | build exit 0; smoke `curl` returns 200 `[]` |
+| Contract grep gates | `scripts/contract-grep-gates.sh` (Phase 2 adds it; output → `docs/test-results/phase-<P>/grep-gates.txt`) | zero matches for: `db.Exec("PRAGMA` (DSN-only config, `C-CONV-9`); `BEGIN` without `IMMEDIATE` in `internal/store`; `time.Sleep` in `internal/`; `lease_generation = lease_generation + [^1]` / a literal generation write (`C-INV-2`); a join/comparison between a TEXT time column (`created_at`,`updated_at`) and any `lease_*`/`*_ms` INTEGER column (`C-CONV-1`); `SELECT` followed by a deciding write in the same function (`C-CONV-4` — heuristic, flagged for human review, not an error by itself) |
+| Full plan run | `scripts/run-test-plan.sh <phase>` (Phase 2 adds it) | runs the phase's catalogue rows in §2 order, writes `docs/test-results/phase-<P>/{index.md,summary.md}`; exit non-zero on any row failure |
+
+---
+
+## 6. What cannot be automated — stated, not omitted
+
+1. **The real operator's memory.** Every memory assertion runs against the mock (`C-OUTBOX-21`).
+   The board side of at-least-once, dedup-by-id, uncertainty and dead-lettering is fully testable;
+   the *far side's* dedup, `Get` semantics and latency are not, until the Python memory MCP server is
+   reachable. The adapter interface (`C-OUTBOX-19`) makes the real adapter a drop-in; §21's memory
+   area is therefore proven against the mock and re-pointed, not re-written, when the real one lands.
+2. **The trusted-local security property (`C-AUTH-5`).** Tests prove the configured honour system
+   (403 capability fences, header gating, `system` rejection). That any local process can present any
+   actor is the contract's own stated limitation; v1 ships it as documentation, and no test can prove
+   a negative about a determined local attacker. Security review (Phase 6) probes the *enforcement of
+   the stated rules*, not the unstated security boundary.
+3. **The deferred audit gaps (`C-AUDIT-9`).** Ticket delete, note delete and board/epic CRUD write
+   no audit rows by contract. Tests assert the absence (so a *new* silent gap cannot hide among the
+   *known* ones), and the coverage map marks spec §13's broader audit intent as deferred — visible,
+   not quietly dropped.
+4. **The 60-second sweeper default (`C-CLAIM-20`).** Its value is asserted as configuration; its
+   correctness is exercised through the interval knob and the fake clock. A test that waits a real
+   minute would buy nothing the knob does not, so the plan does not ship one.
+5. **UI-level E2E.** §21's E2E is read at the API/process level (T-E2E-01/02). Drag-and-drop, the
+   lease countdown and the handoff badge need a browser driver: that is Phase 4 scope (Playwright),
+   with the node-outside-`/home` constraint of §5. Until then, "the UI shows the claimant" is
+   human-verified evidence, and the plan says so instead of pretending T-E2E covers pixels.
+6. **`-race` under `CGO_ENABLED=0`.** A toolchain fact (recon §10), not a choice. The gates are split
+   so the shipped binary is still cgo-free.
+7. **Multi-host clock skew.** `C-FENCE-10`'s "no grace window" is proven with the fake clock on one
+   host. v1 is localhost, single process (per business plan); a fleet across machines is out of
+   scope until remote auth lands.
+8. **Throughput/latency numbers.** §21 asks for correctness under contention, not performance.
+   T-CLAIM-16 bounds *correct* busy behaviour; nothing here certifies claims/second.
+9. **Upstream's license (`[OWNER-3]`).** An owner decision, not an engineering test.
+
+---
+
+## 7. Coverage map — §21 area → test IDs
+
+| §21 area (verbatim) | Test IDs |
+|---|---|
+| Regression: upstream suite | T-REG-01 |
+| Regression: board / epic | T-REG-02 |
+| Regression: ticket / note / relation | T-REG-03 |
+| Regression: ready / context | T-REG-04 |
+| Regression: MCP / REST | T-REG-05, T-REG-06, T-REG-13, T-REG-14 |
+| Regression: SSE | T-REG-07 |
+| Claims: ≥5 concurrent claimants on one ticket | T-CLAIM-01 |
+| Claims: multi-ticket | T-CLAIM-02 |
+| Claims: renew | T-CLAIM-07, T-CLAIM-08, T-CRASH-e |
+| Claims: expire | T-CLAIM-05, T-CLAIM-08, T-CLAIM-15, T-CLAIM-22, T-E2E-01(6) |
+| Claims: release | T-CLAIM-10, T-CLAIM-11 |
+| Claims: fencing | T-CLAIM-09, T-CLAIM-14, T-CLAIM-17, T-CLAIM-19, T-CLAIM-22, T-CLAIM-20 |
+| Claims: human override | T-CLAIM-12, T-CLAIM-13, T-CLAIM-14, T-AUTH-01 |
+| Claims: busy DB | T-CLAIM-16, T-IDEM-03 |
+| Handoffs: validation | T-HAND-01 |
+| Handoffs: immutability | T-HAND-04, T-HAND-07 |
+| Handoffs: outbox atomicity | T-HAND-05, T-CRASH-b |
+| Handoffs: restart | T-HAND-09 |
+| Handoffs: idempotency | T-HAND-10, T-IDEM-01, T-IDEM-02, T-CLAIM-21 |
+| Memory: mock provider | T-MEM-01, T-MEM-09 |
+| Memory: offline board | T-MEM-05 |
+| Memory: success / fail / retry | T-MEM-02, T-MEM-03, T-MEM-04, T-MEM-07, T-MEM-11 |
+| Memory: crash after external success | T-CRASH-c, T-MEM-06, T-MEM-08 |
+| Crash (a) claim/audit/SSE | T-CRASH-a, T-IDEM-05 |
+| Crash (b) mid-handoff | T-CRASH-b |
+| Crash (c) after external success | T-CRASH-c |
+| Crash (d) during migration | T-CRASH-d |
+| Crash (e) during renewal | T-CRASH-e |
+| Migration: real upstream-populated DB → IDs/relations/API/MCP intact | T-MIG-01, T-MIG-02, T-MIG-03 |
+| Migration: down round trip + `foreign_key_check` | T-MIG-04 |
+| Migration: additive proof (old binary on new DB) | T-MIG-05, T-MIG-06 |
+| E2E: ≥5 agents, separate connections, outage + override + stale rejection | T-E2E-01 |
+| E2E: sustained fleet scenario | T-E2E-02 |
+| Quality gates: gofmt / vet / test / race / frontend build / clean binary | §5 (commands; artifacts `phase-<P>/summary.md`) |
+
+Supporting areas (not §21 lines, but rules QA must see proven): idempotency semantics T-IDEM-01..05;
+authz T-AUTH-01..03; error codes T-ERR-01/02; audit T-AUDIT-01..04; protected-vs-open matrix
+T-CLAIM-20; invariants T-CLAIM-18.
+
+---
+
+## 8. Execution order by phase
+
+| Phase | Rows that first run there |
+|---|---|
+| 2 (domain) | T-CLAIM-01..05, 07..12, 15..22 · T-IDEM-01..05 · T-HAND-01..08, 10 · T-AUDIT-01..04 · T-CRASH-a, b, d, e · T-MIG-01..06 |
+| 3 (transports) | T-REG-02..14 · T-CLAIM-06, 13, 14, 20 · T-AUTH-01..03 · T-ERR-01/02 |
+| 5 (memory) | T-MEM-01..11 · T-CRASH-c · T-HAND-09's delivery leg |
+| 6 (hardening) | whole catalogue re-run under `-race`; every crash boundary re-verified 20×; T-CLAIM-16 re-measured |
+| 7 (validate) | T-E2E-01, T-E2E-02; full `run-test-plan.sh` sweep |
+
+A row may be *drafted* earlier than its phase, but a phase is not done until its rows pass and their
+evidence exists.
+
+---
+
+## 9. Contract gaps and ambiguities found while writing this plan
+
+Raised for the architect/lead; each test above asserts the **current** text, written so that resolving
+the ambiguity flips exactly one assertion (recorded in the evidence header), never weakens one.
+
+| # | Finding | Where it bites | Suggested resolution |
+|---|---|---|---|
+| G1 | **`C-CLAIM-18` contradicts the release statement and transition T3.** C-CLAIM-18 says release by an actor with no *live* claim → `409 not_claim_holder` (or `lease_expired` if the caller was the lapsed holder), but the §2.5 release SQL has no expiry guard — a lapsed holder with matching generation affects 1 row (200) — and T3 explicitly lists `release_claim` from `LAPSED`. The §2.7 diagnosis table has no `lease_expired` row for release. | T-CLAIM-11 | Adopt the SQL/T3 reading: lapsed-holder release succeeds (it is cleanup, generation still bumps). Reword C-CLAIM-18 to cover renew only, or add the expiry guard to release — either way, one sentence. |
+| G2 | **Checksum field set is undefined for the accept transition.** `C-SCHEMA-10`/`C-HANDOFF-9` say the checksum is the SHA-256 of the canonical v1 document, but the document includes `status`/`accepted_by`/`accepted_at`, which `accept` changes — so "drift is detectable" would flag every legitimate accept. | T-HAND-04 | Phase 2 must define (and contracts.md must state) which fields are inside the checksummed canonical form — recommended: the author-controlled fields, excluding status/accepted_*/created_at. |
+| G3 | **`C-IDEM-16`'s purge rate-limit state has no home.** "At most once every 10 minutes" needs a last-purge timestamp (in-process memory? a table?) — unspecified, and it decides whether two server processes purge independently. | T-IDEM-04, multi-process note | State the storage (in-process is fine if purge is also run on startup) and that correctness never depends on the purge. |
+| G4 | **No named lease-TTL or sweep-interval knob.** Contracts name `LEDGERBOARD_CLAIMABLE_STATUSES` but neither the TTL (spec says 15 min default) nor the sweep interval (`C-CLAIM-20`) nor the worker poll (`C-OUTBOX-17`'s 1 s sleep) as config — all three must exist with validated defaults for tests to bound themselves. | H5, H7, G9 | Add the three knobs with startup validation; defaults are the contract values. |
+| G5 | **No crash-point vocabulary exists in the contract.** The plan defines 8 hooks (§1.4) + migration landmarks; Phase 2 must build them inert-by-default. | H3, §3 | A short contract note ("crashpoints are test infrastructure, inert unless `LEDGERBOARD_CRASH_POINTS` names them") prevents a later reviewer reading them as product logic. |
+| G6 | **`lease_generation_mismatch` on content edits has narrow reachability.** Generation only changes when holder or claim-ends change, so the natural stale-write path is the same-holder reassign (T8) — T-CLAIM-14 uses it deliberately. The §2.7 row "holder, generation, live lease, but status ≠ `in_progress`" is unreachable while `C-INV-4` holds (defensive only). | T-CLAIM-14, T-CLAIM-09 | Worth a footnote in contracts.md so QA does not chase a phantom; the defensive row is still covered by a direct-SQL fixture unit test. |
+| G7 | **`C-AUTH-7` counts "four 'no' cells" for agent; the table has five behaviours** (board/epic CRUD, reassign, revoke, unblock, dead-letter retry). Cosmetic, but QA diffing cells against prose will trip. | T-AUTH-01 | Recount or scope the sentence to ownership cells. |
+| G8 | **Dirty-migration behaviour is not contracted.** `C-SCHEMA-3` says the existing golang-migrate path applies `0002`, but nothing states what a crash mid-migration must do. The vendored driver marks versions dirty; the *contracted* behaviour (fail closed; force is an explicit operator action; never half-serve) should be a rule, not an implementation accident. | T-CRASH-d | Add a rule (suggest `C-SCHEMA-19`) stating fail-closed + explicit force. |
+| G9 | **`C-OUTBOX-17`'s "sleeping 1 s" is a wall-clock sleep.** With no knob, idle-worker tests wait in real time. | H-adjacent | `LEDGERBOARD_WORKER_POLL_MS` (default 1000), same pattern as H5. |
