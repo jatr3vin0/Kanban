@@ -1,0 +1,53 @@
+### starting server
+
+### 1. create board
+board_id=d3251bb6a7604239a8361c9c90ae3296
+
+### 2. create ticket
+ticket_id=83f681a8a8864a1cbe1deff69e6570e9
+body: {"id":"83f681a8a8864a1cbe1deff69e6570e9","board_id":"d3251bb6a7604239a8361c9c90ae3296","epic_id":null,"title":"t1","description":"","status":"todo","priority":"high","assignee":"","created_at":"2026-10-30T23:08:22.180080756Z","updated_at":"2026-10-30T23:08:22.180080803Z"}
+
+### 3. PUT with an unknown field (lease_expires_at) — dropped or rejected?
+HTTP 200
+body: {"id":"83f681a8a8864a1cbe1deff69e6570e9","board_id":"d3251bb6a7604239a8361c9c90ae3296","epic_id":null,"title":"t1-renamed","description":"","status":"todo","priority":"high","assignee":"","created_at":"2026-10-30T23:08:22Z","updated_at":"2026-10-30T23:08:22Z"}
+
+### 4. PUT with status 'in progress' (README vocabulary, space)
+HTTP 400
+body: {"error": "status must be one of: todo, in_progress, done, blocked"}
+
+### 5. PUT with status 'in_progress' (wire vocabulary, underscore)
+HTTP 200
+
+### 6. README-documented SSE route GET /api/v1/boards/{id}/events
+HTTP 404 content-type=text/plain; charset=utf-8
+404 page not found
+
+
+### 7. real SSE route GET /api/v1/events (2s sample, one ticket create in flight)
+--- raw stream ---
+event: ping
+data: {}
+
+event: board_change
+data: {"type":"ticket.created","board_id":"d3251bb6a7604239a8361c9c90ae3296"}
+
+event: board_change
+data: {"type":"note.created","board_id":"d3251bb6a7604239a8361c9c90ae3296"}
+
+event: board_change
+data: {"type":"task.created","board_id":"d3251bb6a7604239a8361c9c90ae3296"}
+
+
+### 8. second-precision timestamps: 3 tickets created back to back
+t1-renamed|2026-10-30T23:08:22Z
+sse-trigger|2026-10-30T23:08:22Z
+ts-1|2026-10-30T23:08:24Z
+ts-2|2026-10-30T23:08:24Z
+ts-3|2026-10-30T23:08:24Z
+distinct created_at values: 2 / 5 tickets
+
+### 9. board delete cascade (FK is per-connection — check for orphans)
+DELETE board HTTP 204
+boards=0 epics=0 tickets=0 notes=0 tasks=0 events=0
+
+### 10. concurrency: 20 simultaneous PUTs to one ticket

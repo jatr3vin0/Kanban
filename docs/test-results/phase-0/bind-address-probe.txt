@@ -1,0 +1,6 @@
+=== stdio transport, explicit -port 8101, stdin held open by sleep ===
+log:
+curl 127.0.0.1:8101/api/v1/boards -> 200
+curl 127.0.0.1:8101/ (UI)          -> 200
+listening socket table entries for 8101 (0x1FA5):
+  (0100007F = 127.0.0.1, 00000000 = 0.0.0.0/all interfaces)

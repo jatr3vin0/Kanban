@@ -1,0 +1,8 @@
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/api	1.310s
+ok  	github.com/rgracey/kanban-mcp/internal/config	1.013s
+ok  	github.com/rgracey/kanban-mcp/internal/db	1.102s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	1.418s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/store	1.439s

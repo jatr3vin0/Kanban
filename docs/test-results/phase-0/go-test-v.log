@@ -1,0 +1,239 @@
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+=== RUN   TestAPIBoards
+=== RUN   TestAPIBoards/CreateBoard
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 201 187B in 382.691µs
+=== RUN   TestAPIBoards/CreateBoard_ValidationError
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 400 30B in 9.679µs
+=== RUN   TestAPIBoards/CreateBoard_EmptyName
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 400 30B in 6.427µs
+=== RUN   TestAPIBoards/ListBoards
+2026/10/30 23:03:48 "GET http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 200 169B in 112.053µs
+=== RUN   TestAPIBoards/GetBoard
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 201 175B in 63.045µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:33483/api/v1/boards/cc6a41811d4749cd86362d92a1313dfe HTTP/1.1" from 127.0.0.1:53982 - 200 155B in 79.781µs
+=== RUN   TestAPIBoards/GetBoard_NotFound
+2026/10/30 23:03:48 "GET http://127.0.0.1:33483/api/v1/boards/nonexistent-id HTTP/1.1" from 127.0.0.1:53982 - 404 23B in 63.699µs
+=== RUN   TestAPIBoards/UpdateBoard
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 201 174B in 66.728µs
+2026/10/30 23:03:48 "PUT http://127.0.0.1:33483/api/v1/boards/e42f19b1ef2640d7982ff8ce82f0faa0 HTTP/1.1" from 127.0.0.1:53982 - 200 172B in 113.184µs
+=== RUN   TestAPIBoards/UpdateBoard_Partial
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 201 174B in 54.883µs
+2026/10/30 23:03:48 "PUT http://127.0.0.1:33483/api/v1/boards/5c407594e90341e68f25b352c20dde58 HTTP/1.1" from 127.0.0.1:53982 - 200 158B in 110.032µs
+=== RUN   TestAPIBoards/UpdateBoard_NotFound
+2026/10/30 23:03:48 "PUT http://127.0.0.1:33483/api/v1/boards/nonexistent-id HTTP/1.1" from 127.0.0.1:53982 - 404 23B in 128.084µs
+=== RUN   TestAPIBoards/DeleteBoard
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:53982 - 201 170B in 75.862µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards/1c50b366479740189ebdf1a0152dcf91/tickets HTTP/1.1" from 127.0.0.1:53982 - 201 293B in 321.631µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/tickets/5901caaf664f4a779b310c62b1e50af1/notes HTTP/1.1" from 127.0.0.1:53982 - 201 205B in 315.797µs
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:33483/api/v1/boards/1c50b366479740189ebdf1a0152dcf91 HTTP/1.1" from 127.0.0.1:53982 - 204 0B in 368.183µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:33483/api/v1/boards/1c50b366479740189ebdf1a0152dcf91 HTTP/1.1" from 127.0.0.1:53982 - 404 23B in 82.209µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:33483/api/v1/tickets/5901caaf664f4a779b310c62b1e50af1 HTTP/1.1" from 127.0.0.1:53984 - 404 23B in 90.855µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:33483/api/v1/notes/c153ff8d8eb142e5a329b5c3be52aafa HTTP/1.1" from 127.0.0.1:53994 - 404 23B in 76.743µs
+=== RUN   TestAPIBoards/DeleteBoard_NotFound
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:33483/api/v1/boards/nonexistent-id HTTP/1.1" from 127.0.0.1:54002 - 404 23B in 81.907µs
+=== RUN   TestAPIBoards/GetBoardSummary
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards HTTP/1.1" from 127.0.0.1:54002 - 201 174B in 79.075µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards/bff6f46fac3d4675a5e3559bb53f42bf/tickets HTTP/1.1" from 127.0.0.1:54002 - 201 288B in 119.45µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards/bff6f46fac3d4675a5e3559bb53f42bf/tickets HTTP/1.1" from 127.0.0.1:54014 - 201 302B in 153.907µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:33483/api/v1/boards/bff6f46fac3d4675a5e3559bb53f42bf/tickets HTTP/1.1" from 127.0.0.1:54022 - 201 288B in 177.024µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:33483/api/v1/boards/bff6f46fac3d4675a5e3559bb53f42bf/summary HTTP/1.1" from 127.0.0.1:54034 - 200 113B in 259.392µs
+--- PASS: TestAPIBoards (0.01s)
+    --- PASS: TestAPIBoards/CreateBoard (0.00s)
+    --- PASS: TestAPIBoards/CreateBoard_ValidationError (0.00s)
+    --- PASS: TestAPIBoards/CreateBoard_EmptyName (0.00s)
+    --- PASS: TestAPIBoards/ListBoards (0.00s)
+    --- PASS: TestAPIBoards/GetBoard (0.00s)
+    --- PASS: TestAPIBoards/GetBoard_NotFound (0.00s)
+    --- PASS: TestAPIBoards/UpdateBoard (0.00s)
+    --- PASS: TestAPIBoards/UpdateBoard_Partial (0.00s)
+    --- PASS: TestAPIBoards/UpdateBoard_NotFound (0.00s)
+    --- PASS: TestAPIBoards/DeleteBoard (0.00s)
+    --- PASS: TestAPIBoards/DeleteBoard_NotFound (0.00s)
+    --- PASS: TestAPIBoards/GetBoardSummary (0.00s)
+=== RUN   TestAPIEpics
+2026/10/30 23:03:48 "POST http://127.0.0.1:35439/api/v1/boards HTTP/1.1" from 127.0.0.1:60166 - 201 171B in 383.643µs
+=== RUN   TestAPIEpics/CreateEpic
+2026/10/30 23:03:48 "POST http://127.0.0.1:35439/api/v1/boards/dacc6acc234e43edb5837cdb82095b07/epics HTTP/1.1" from 127.0.0.1:60166 - 201 233B in 128.916µs
+=== RUN   TestAPIEpics/CreateEpic_ValidationError
+2026/10/30 23:03:48 "POST http://127.0.0.1:35439/api/v1/boards/dacc6acc234e43edb5837cdb82095b07/epics HTTP/1.1" from 127.0.0.1:60166 - 400 31B in 10.65µs
+=== RUN   TestAPIEpics/ListEpics
+2026/10/30 23:03:48 "GET http://127.0.0.1:35439/api/v1/boards/dacc6acc234e43edb5837cdb82095b07/epics HTTP/1.1" from 127.0.0.1:60166 - 200 215B in 116.082µs
+=== RUN   TestAPIEpics/GetEpic
+2026/10/30 23:03:48 "POST http://127.0.0.1:35439/api/v1/boards/dacc6acc234e43edb5837cdb82095b07/epics HTTP/1.1" from 127.0.0.1:60166 - 201 216B in 76.948µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:35439/api/v1/epics/061caa919b634a928d9d681af2af2078 HTTP/1.1" from 127.0.0.1:60166 - 200 196B in 99.182µs
+=== RUN   TestAPIEpics/GetEpic_NotFound
+2026/10/30 23:03:48 "GET http://127.0.0.1:35439/api/v1/epics/nonexistent-id HTTP/1.1" from 127.0.0.1:60166 - 404 23B in 69.498µs
+=== RUN   TestAPIEpics/UpdateEpic
+2026/10/30 23:03:48 "POST http://127.0.0.1:35439/api/v1/boards/dacc6acc234e43edb5837cdb82095b07/epics HTTP/1.1" from 127.0.0.1:60166 - 201 221B in 70.867µs
+2026/10/30 23:03:48 "PUT http://127.0.0.1:35439/api/v1/epics/4b3af4541e744e178b1da89b3c0a301a HTTP/1.1" from 127.0.0.1:60166 - 200 219B in 154.752µs
+=== RUN   TestAPIEpics/UpdateEpic_NotFound
+2026/10/30 23:03:48 "PUT http://127.0.0.1:35439/api/v1/epics/nonexistent-id HTTP/1.1" from 127.0.0.1:60166 - 404 23B in 90.022µs
+=== RUN   TestAPIEpics/DeleteEpic
+2026/10/30 23:03:48 "POST http://127.0.0.1:35439/api/v1/boards/dacc6acc234e43edb5837cdb82095b07/epics HTTP/1.1" from 127.0.0.1:60166 - 201 216B in 63.486µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:35439/api/v1/boards/dacc6acc234e43edb5837cdb82095b07/tickets HTTP/1.1" from 127.0.0.1:60166 - 201 321B in 174.923µs
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:35439/api/v1/epics/d8c46f5d837747d9a4bd326b05daae64 HTTP/1.1" from 127.0.0.1:60166 - 204 0B in 362.136µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:35439/api/v1/epics/d8c46f5d837747d9a4bd326b05daae64 HTTP/1.1" from 127.0.0.1:60166 - 404 23B in 80.42µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:35439/api/v1/tickets/f0fb466cd1054859b5cdad6482c38d4a HTTP/1.1" from 127.0.0.1:60180 - 200 271B in 145.246µs
+=== RUN   TestAPIEpics/DeleteEpic_NotFound
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:35439/api/v1/epics/nonexistent-id HTTP/1.1" from 127.0.0.1:60180 - 404 23B in 51.071µs
+--- PASS: TestAPIEpics (0.01s)
+    --- PASS: TestAPIEpics/CreateEpic (0.00s)
+    --- PASS: TestAPIEpics/CreateEpic_ValidationError (0.00s)
+    --- PASS: TestAPIEpics/ListEpics (0.00s)
+    --- PASS: TestAPIEpics/GetEpic (0.00s)
+    --- PASS: TestAPIEpics/GetEpic_NotFound (0.00s)
+    --- PASS: TestAPIEpics/UpdateEpic (0.00s)
+    --- PASS: TestAPIEpics/UpdateEpic_NotFound (0.00s)
+    --- PASS: TestAPIEpics/DeleteEpic (0.00s)
+    --- PASS: TestAPIEpics/DeleteEpic_NotFound (0.00s)
+=== RUN   TestAPITickets
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards HTTP/1.1" from 127.0.0.1:50244 - 201 173B in 242.471µs
+=== RUN   TestAPITickets/CreateTicket
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50244 - 201 298B in 210.197µs
+=== RUN   TestAPITickets/CreateTicket_ValidationError
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50244 - 400 31B in 23.452µs
+=== RUN   TestAPITickets/CreateTicket_InvalidStatus
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50244 - 400 69B in 13.13µs
+=== RUN   TestAPITickets/CreateTicket_InvalidPriority
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50244 - 400 66B in 12.42µs
+=== RUN   TestAPITickets/ListTickets
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50244 - 200 280B in 97.547µs
+=== RUN   TestAPITickets/ListTickets_StatusFilter
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50244 - 201 283B in 175.138µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets?status=done HTTP/1.1" from 127.0.0.1:50254 - 200 266B in 128.857µs
+=== RUN   TestAPITickets/ListTickets_PriorityFilter
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets?priority=high HTTP/1.1" from 127.0.0.1:50254 - 200 280B in 80.425µs
+=== RUN   TestAPITickets/ListTickets_QuerySearch
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50254 - 201 333B in 180.967µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets?q=keyword HTTP/1.1" from 127.0.0.1:50260 - 200 315B in 202.512µs
+=== RUN   TestAPITickets/GetTicket
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50260 - 201 283B in 310.422µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/tickets/4cf8486a4d1f47718e16a771bbd38455 HTTP/1.1" from 127.0.0.1:50260 - 200 263B in 153.49µs
+=== RUN   TestAPITickets/GetTicket_NotFound
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/tickets/nonexistent-id HTTP/1.1" from 127.0.0.1:50260 - 404 23B in 65.066µs
+=== RUN   TestAPITickets/UpdateTicket
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50260 - 201 287B in 186.47µs
+2026/10/30 23:03:48 "PUT http://127.0.0.1:38709/api/v1/tickets/c769307210004665a8f3677d52ef4d89 HTTP/1.1" from 127.0.0.1:50260 - 200 291B in 242.885µs
+=== RUN   TestAPITickets/UpdateTicket_NotFound
+2026/10/30 23:03:48 "PUT http://127.0.0.1:38709/api/v1/tickets/nonexistent-id HTTP/1.1" from 127.0.0.1:50260 - 404 23B in 117.079µs
+=== RUN   TestAPITickets/DeleteTicket
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/boards/239d50c1e1ba4537a495374f1f979ec5/tickets HTTP/1.1" from 127.0.0.1:50260 - 201 282B in 173.237µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:38709/api/v1/tickets/527e661e5a1e4067a03cf4517ec4bd34/notes HTTP/1.1" from 127.0.0.1:50260 - 201 205B in 206.009µs
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:38709/api/v1/tickets/527e661e5a1e4067a03cf4517ec4bd34 HTTP/1.1" from 127.0.0.1:50260 - 204 0B in 231.518µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/tickets/527e661e5a1e4067a03cf4517ec4bd34 HTTP/1.1" from 127.0.0.1:50260 - 404 23B in 47.766µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:38709/api/v1/notes/0a9f71c139854f7eb63a0e06259a9eb3 HTTP/1.1" from 127.0.0.1:50264 - 404 23B in 92.362µs
+=== RUN   TestAPITickets/DeleteTicket_NotFound
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:38709/api/v1/tickets/nonexistent-id HTTP/1.1" from 127.0.0.1:50280 - 404 23B in 78.168µs
+--- PASS: TestAPITickets (0.01s)
+    --- PASS: TestAPITickets/CreateTicket (0.00s)
+    --- PASS: TestAPITickets/CreateTicket_ValidationError (0.00s)
+    --- PASS: TestAPITickets/CreateTicket_InvalidStatus (0.00s)
+    --- PASS: TestAPITickets/CreateTicket_InvalidPriority (0.00s)
+    --- PASS: TestAPITickets/ListTickets (0.00s)
+    --- PASS: TestAPITickets/ListTickets_StatusFilter (0.00s)
+    --- PASS: TestAPITickets/ListTickets_PriorityFilter (0.00s)
+    --- PASS: TestAPITickets/ListTickets_QuerySearch (0.00s)
+    --- PASS: TestAPITickets/GetTicket (0.00s)
+    --- PASS: TestAPITickets/GetTicket_NotFound (0.00s)
+    --- PASS: TestAPITickets/UpdateTicket (0.00s)
+    --- PASS: TestAPITickets/UpdateTicket_NotFound (0.00s)
+    --- PASS: TestAPITickets/DeleteTicket (0.00s)
+    --- PASS: TestAPITickets/DeleteTicket_NotFound (0.00s)
+=== RUN   TestAPINotes
+2026/10/30 23:03:48 "POST http://127.0.0.1:33911/api/v1/boards HTTP/1.1" from 127.0.0.1:32974 - 201 170B in 269.929µs
+2026/10/30 23:03:48 "POST http://127.0.0.1:33911/api/v1/boards/76e13045014f45c7b00635de62638b74/tickets HTTP/1.1" from 127.0.0.1:32974 - 201 289B in 239.013µs
+=== RUN   TestAPINotes/CreateNote
+2026/10/30 23:03:48 "POST http://127.0.0.1:33911/api/v1/tickets/27f4da6340d14dfaa490612f0ad14e84/notes HTTP/1.1" from 127.0.0.1:32974 - 201 200B in 269.276µs
+=== RUN   TestAPINotes/CreateNote_ValidationError
+2026/10/30 23:03:48 "POST http://127.0.0.1:33911/api/v1/tickets/27f4da6340d14dfaa490612f0ad14e84/notes HTTP/1.1" from 127.0.0.1:32974 - 400 30B in 85.826µs
+=== RUN   TestAPINotes/CreateNote_EmptyBody
+2026/10/30 23:03:48 "POST http://127.0.0.1:33911/api/v1/tickets/27f4da6340d14dfaa490612f0ad14e84/notes HTTP/1.1" from 127.0.0.1:32974 - 400 30B in 67.93µs
+=== RUN   TestAPINotes/ListNotes
+2026/10/30 23:03:48 "GET http://127.0.0.1:33911/api/v1/tickets/27f4da6340d14dfaa490612f0ad14e84/notes HTTP/1.1" from 127.0.0.1:32974 - 200 182B in 84.025µs
+=== RUN   TestAPINotes/UpdateNote
+2026/10/30 23:03:48 "POST http://127.0.0.1:33911/api/v1/tickets/27f4da6340d14dfaa490612f0ad14e84/notes HTTP/1.1" from 127.0.0.1:32974 - 201 203B in 174.567µs
+2026/10/30 23:03:48 "PUT http://127.0.0.1:33911/api/v1/notes/ac0c99ef8cb74f4faa5cba618f2a8826 HTTP/1.1" from 127.0.0.1:32974 - 200 188B in 179.383µs
+=== RUN   TestAPINotes/UpdateNote_NotFound
+2026/10/30 23:03:48 "PUT http://127.0.0.1:33911/api/v1/notes/nonexistent-id HTTP/1.1" from 127.0.0.1:32974 - 404 23B in 90.756µs
+=== RUN   TestAPINotes/DeleteNote
+2026/10/30 23:03:48 "POST http://127.0.0.1:33911/api/v1/tickets/27f4da6340d14dfaa490612f0ad14e84/notes HTTP/1.1" from 127.0.0.1:32974 - 201 199B in 178.066µs
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:33911/api/v1/notes/f6ac5caaa5054b21a9faae18d028172e HTTP/1.1" from 127.0.0.1:32974 - 204 0B in 101.186µs
+2026/10/30 23:03:48 "GET http://127.0.0.1:33911/api/v1/notes/f6ac5caaa5054b21a9faae18d028172e HTTP/1.1" from 127.0.0.1:32974 - 404 23B in 58.426µs
+=== RUN   TestAPINotes/DeleteNote_NotFound
+2026/10/30 23:03:48 "DELETE http://127.0.0.1:33911/api/v1/notes/nonexistent-id HTTP/1.1" from 127.0.0.1:32980 - 404 23B in 96.354µs
+--- PASS: TestAPINotes (0.01s)
+    --- PASS: TestAPINotes/CreateNote (0.00s)
+    --- PASS: TestAPINotes/CreateNote_ValidationError (0.00s)
+    --- PASS: TestAPINotes/CreateNote_EmptyBody (0.00s)
+    --- PASS: TestAPINotes/ListNotes (0.00s)
+    --- PASS: TestAPINotes/UpdateNote (0.00s)
+    --- PASS: TestAPINotes/UpdateNote_NotFound (0.00s)
+    --- PASS: TestAPINotes/DeleteNote (0.00s)
+    --- PASS: TestAPINotes/DeleteNote_NotFound (0.00s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.045s
+=== RUN   TestLoad_Defaults
+--- PASS: TestLoad_Defaults (0.00s)
+=== RUN   TestLoad_EnvVars
+--- PASS: TestLoad_EnvVars (0.00s)
+=== RUN   TestLoad_FlagOverridesEnv
+--- PASS: TestLoad_FlagOverridesEnv (0.00s)
+=== RUN   TestLoad_ValidTransports
+--- PASS: TestLoad_ValidTransports (0.00s)
+=== RUN   TestLoad_InvalidTransport
+--- PASS: TestLoad_InvalidTransport (0.00s)
+=== RUN   TestLoad_ValidLogLevels
+--- PASS: TestLoad_ValidLogLevels (0.00s)
+=== RUN   TestLoad_InvalidLogLevel
+--- PASS: TestLoad_InvalidLogLevel (0.00s)
+=== RUN   TestLoad_Combined
+--- PASS: TestLoad_Combined (0.00s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/config	0.005s
+=== RUN   TestOpen
+--- PASS: TestOpen (0.01s)
+=== RUN   TestOpenReRun
+--- PASS: TestOpenReRun (0.00s)
+=== RUN   TestOpenInvalidPath
+--- PASS: TestOpenInvalidPath (0.00s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.020s
+=== RUN   TestAllToolsRegistered
+--- PASS: TestAllToolsRegistered (0.00s)
+=== RUN   TestBoardGetByName
+--- PASS: TestBoardGetByName (0.00s)
+=== RUN   TestBoardCRUD
+--- PASS: TestBoardCRUD (0.00s)
+=== RUN   TestEpicCRUD
+--- PASS: TestEpicCRUD (0.00s)
+=== RUN   TestTicketWorkflow
+--- PASS: TestTicketWorkflow (0.00s)
+=== RUN   TestNoteCRUD
+--- PASS: TestNoteCRUD (0.00s)
+=== RUN   TestTaskCRUD
+--- PASS: TestTaskCRUD (0.00s)
+=== RUN   TestBulkCreate
+--- PASS: TestBulkCreate (0.00s)
+=== RUN   TestTicketHistory
+--- PASS: TestTicketHistory (0.00s)
+=== RUN   TestTicketGetIncludeTasksAndRelations
+--- PASS: TestTicketGetIncludeTasksAndRelations (0.00s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.044s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+=== RUN   TestStoreBoards
+--- PASS: TestStoreBoards (0.01s)
+=== RUN   TestStoreEpics
+--- PASS: TestStoreEpics (0.00s)
+=== RUN   TestStoreTickets
+--- PASS: TestStoreTickets (0.00s)
+=== RUN   TestStoreNotes
+--- PASS: TestStoreNotes (0.21s)
+=== RUN   TestGetBoardSummary
+--- PASS: TestGetBoardSummary (0.00s)
+=== RUN   TestStoreInterfaceImplementation
+--- PASS: TestStoreInterfaceImplementation (0.00s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.226s
+test_exit=0
