@@ -41,8 +41,8 @@ AND ( lease_holder IS NULL                       -- nobody owns it: open
 |---|---|---|---|---|---|---|
 | `POST /tickets/{id}/claim` · `claim{action:"claim"}` | no — this *is* the claim | no | **required** | `claimed` | agent, orchestrator | **+1**, old token dead |
 | `POST /boards/{id}/claim-next` · `claim{action:"next"}` | no | no | **required** | `claimed` (source `claim_next`) | agent, orchestrator | **+1** |
-| `POST /tickets/{id}/claim/renew` · `claim{action:"renew"}` | yes — holder | no | no | `claim_renewed` | agent, orchestrator | unchanged |
-| `DELETE /tickets/{id}/claim` · `claim{action:"release"}` | yes — holder | no | no | `claim_released` (`reason:"release"`) | agent, orchestrator, human | **+1**, holder cleared |
+| `POST /tickets/{id}/claim/renew` · `claim{action:"renew"}` | yes — holder, **live lease only** (`C-CLAIM-14`) | no | no | `claim_renewed` | agent, orchestrator | unchanged |
+| `DELETE /tickets/{id}/claim` · `claim{action:"release"}` | yes — holder, **live or lapsed** (`C-CLAIM-18`) | no | no | `claim_released` (`reason:"release"`) | agent, orchestrator, human | **+1**, holder cleared |
 | `GET /tickets/{id}/claim` · `claim{action:"get"}` | no | no | no | not audited (read) | all | none |
 | `POST /tickets/{id}/reassign` · `claim{action:"reassign"}` | no — override | no | no | `claim_reassigned` (`override:true` when a live lease existed) | **human, orchestrator** | **+1**, old token dead |
 | `POST /tickets/{id}/revoke` · `claim{action:"revoke"}` | no — override | no | no | `claim_revoked` | **human, orchestrator** | **+1**, holder cleared |
@@ -57,6 +57,7 @@ AND ( lease_holder IS NULL                       -- nobody owns it: open
 | `C-GUARD-6` | `claim` and `claim_next` do **not** require `expected_version`: a claim is a transition on the ticket, not a write against a state the caller has read. Requiring it would also make the very first claim awkward for an agent that discovered the ticket by id. If supplied, it *is* enforced (`409 version_conflict`) — the field is never silently ignored. |
 | `C-GUARD-7` | `reassign` over a live lease requires `override: true` in the body; without it, `409 already_claimed` with `details.override_required = true`. This is the only "are you sure" in the system, and it exists so that a bulk UI action cannot silently yank work from an agent mid-task. |
 | `C-GUARD-8` | `revoke` and `reassign` are the two operations where a human takes work away. Both issue a new generation, so every token the old holder has is dead the instant they commit (`C-FENCE-9`). |
+| `C-GUARD-13` | `release` is the one ownership operation whose guard contains **no clock**: the holder and the generation must match, and the lease may be live or lapsed (`C-CLAIM-18`). `renew` is its mirror image — the same two guards **plus** `lease_expires_at > :now_ms` (`C-CLAIM-14`). The asymmetry is deliberate and is the settled reading of `C-CLAIM-18`: renewing *extends* authority and must not survive a lapse, while releasing *surrenders* it, and a stale release can never end anyone else's lease because every new claim issues a higher generation (`C-INV-2`, `C-FENCE-9`). Neither operation may gain or lose its liveness guard without a contract revision. |
 
 ---
 

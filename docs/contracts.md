@@ -29,6 +29,22 @@ Two rules below exist *because* the probe caught the naive version failing (`C-C
 | `C-CONV-7` | **Every mutating response returns the whole entity** including `version` and the `claim` block (§1.4). A caller never has to re-read to learn its generation. |
 | `C-CONV-8` | **Wire times.** INTEGER ms columns are serialized as RFC3339 UTC with exactly three fractional digits (`2026-10-30T23:08:22.180Z`). This differs from the existing second-precision fields by design: leases need sub-second resolution, and changing the existing fields would break `C-COMPAT-1`. |
 | `C-CONV-9` | **Connection setup.** DSN `file:<path>?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)&_txlock=immediate`; one `*sql.DB` for writes with `SetMaxOpenConns(1)`, a separate read pool with `MaxOpenConns(4)`. Pragmas set by `db.Exec` are forbidden (recon H2: they reached 1 of 8 pooled connections). Verified: `busy_timeout=5000`, `foreign_keys=1` on the writer connection. |
+| `C-CONV-10` | **Three timing knobs are contract values.** `LEDGERBOARD_LEASE_TTL_MS` (default `900000` — the spec's 15 minutes; floor `1000`), `LEDGERBOARD_SWEEP_INTERVAL_MS` (default `60000`) and `LEDGERBOARD_WORKER_POLL_MS` (default `1000`). Each is read once at startup and validated as a positive integer; **an invalid value is a startup error naming the variable**, never a silent fallback (`C-OUTBOX-14` is the same rule for `MEMORY_DELIVERY`, `C-CLAIM-3` for the claimable statuses). Precedence, highest first: a CLI flag if the binary has one for that knob, then the environment variable, then the default. The defaults above **are** the contract — tests assert them, and changing one is a contract revision. `:ttl_ms` in every statement in §2 is `LEDGERBOARD_LEASE_TTL_MS`, read at the moment a lease is issued or renewed; changing the knob never rewrites an existing `lease_expires_at`, so a shorter TTL takes effect at the next renewal and a longer one only for new leases. At the `1000` floor a lease can lapse while its holder is waiting out `busy_timeout`; that is legal and surfaces as `lease_expired` (`C-CLAIM-14`), which is why the floor is a test value and not a recommended one. |
+| `C-CONV-11` | **Test-infrastructure seams are inert by default.** Two variables exist only so a test can name a moment: `LEDGERBOARD_CRASH_POINTS` (footnote below) and `LEDGERBOARD_CLOCK` with `LEDGERBOARD_CLOCK_FILE` (`real` by default; `fake` makes `now_ms` come from that file so a test can advance time without sleeping — it substitutes the Go source of `now_ms` and nothing else, so `C-CONV-2` still holds and every statement still receives `:now_ms` as a bound parameter). Unset, both are one atomic load and a branch on a path that already exists. They are **not** product behaviour: no contract outcome may depend on either being set, and a defect that reproduces only with one armed is a test bug, not a product bug. `[LEAD-DECIDED]` — the alternative (real clock, real sleeps) makes the crash and expiry tests either slow or nondeterministic, and §21 requires both. |
+
+**Footnote — the crash-point vocabulary (`C-CONV-11`).** The set is closed and contains eight points:
+`claim.pre_commit`, `claim.post_commit`, `renew.pre_commit`, `renew.post_commit`,
+`handoff.after_handoff_insert`, `handoff.pre_commit`, `memory.post_adapter_write`,
+`memory.pre_ack_commit`. Each is one call site, `crashpoint.Hit("<name>")`, placed inside the
+transaction whose atomicity it tests (`claim.*`/`renew.*` -> `C-CONV-3`, `C-AUDIT-4`, `C-IDEM-12`;
+`handoff.*` -> `C-HANDOFF-14`, `C-IDEM-12`; `memory.*` -> `C-OUTBOX-2`, `C-OUTBOX-9`). Armed, the hook
+writes `crash <name> <seq>` to the crash FIFO, fsyncs it, and `SIGKILL`s the process — never `os.Exit`
+and never a panic, because a deferred commit or rollback is precisely what the test is testing. Unarmed
+— the default, and always in a production run — no point can fire. The migration boundary is
+deliberately **not** a crash point: that runner is vendored `golang-migrate`, so the crash is produced
+by an external watcher killing the process at a named DDL statement, and `C-SCHEMA-19` is the behaviour
+it must then observe. Adding a point is a test-plan change, not a contract change, but no point may be
+added to a path with no rule behind it.
 
 ---
 
@@ -42,6 +58,7 @@ Two rules below exist *because* the probe caught the naive version failing (`C-C
 | `C-SCHEMA-2` | Every added column is nullable **or** has a constant default, so the statement is legal on a populated table and existing rows get a defined value without a rewrite. Existing rows: `version = 1`, `lease_generation = 0`, `lease_renewals = 0`, every lease column `NULL`, `handoff_id NULL`. |
 | `C-SCHEMA-3` | The migration is applied by the existing `golang-migrate` path (`internal/db/db.go`, `schema_migrations` table). No `PRAGMA user_version` logic is introduced (recon: `user_version` is 0 and unused). |
 | `C-SCHEMA-4` | `0002_lease.down.sql` reverses the migration exactly: drop indexes, then columns in reverse order, then tables. It is **destructive by definition** (lease, handoff and outbox rows are lost) and is never invoked automatically — `golang-migrate` runs `Down` only on explicit request. Round-trip verified against a populated database: `tickets` returns to its 11 original columns, `foreign_key_check` is clean. `[LEAD-DECIDED]` — upstream ships down migrations, so the convention is kept; the destructiveness is documented rather than hidden. |
+| `C-SCHEMA-19` | **A dirty migration fails closed.** If `schema_migrations.dirty = 1` — a previous run died between the version bump and the migration's own commit — the server **refuses to start**: it exits non-zero with one line naming the version and the remedy, before binding a listener and before serving any request. It never serves from a half-migrated database, never re-runs the migration automatically, never ignores the flag, and never clears it itself. Recovery is the operator's explicit `force` to a stated version (`golang-migrate force <version>`, or the binary's documented equivalent); that is the only action which resets the flag, and after it the migration is re-applied with the `0001` rows unchanged (`C-SCHEMA-2`). `[LEAD-DECIDED]` — the vendored driver already records dirtiness, so contracting the *reaction* is what stops fail-closed from being an implementation accident a later refactor removes. Placement note: appended here rather than after `C-SCHEMA-18` because it is a migration rule; IDs are stable names, not sequence numbers. |
 
 ### 1.2 `tickets` — added columns
 
@@ -118,7 +135,7 @@ CREATE INDEX handoffs_status         ON handoffs(status, created_at DESC);
 | ID | Rule |
 |---|---|
 | `C-SCHEMA-9` | `handoffs` rows are **append-only**: no `UPDATE` except the single acceptance transition (`status`, `accepted_by`, `accepted_at`) and the supersession transition (`status`). There is no `DELETE` path in the product. Immutability is enforced by the service layer having no other statement. |
-| `C-SCHEMA-10` | The typed columns are the storage form; the v1 JSON document is rebuilt from them on read (§5). `checksum` is the lowercase hex SHA-256 of the canonical JSON of the v1 document as defined in §5.4, so any drift is detectable and idempotent replays compare cheaply. |
+| `C-SCHEMA-10` | The typed columns are the storage form; the v1 JSON document is rebuilt from them on read (§5). `checksum` is the lowercase hex SHA-256 of the canonical JSON of the **checksummed field set** defined in `C-HANDOFF-9` — the creation-time fields only, which is why it survives the accept and supersession transitions unchanged. Any drift in a creation-time field is therefore detectable and idempotent replays compare cheaply. |
 | `C-SCHEMA-11` | `generation` records the fencing generation the author held when the handoff was written — evidence of authority, not a live token. `to_actor NULL` means "offered to whoever claims next". |
 | `C-SCHEMA-12` | `supersedes` references another handoff id with no FK (a correction is a new row; the chain is walked in Go and must not cycle — a self-reference is rejected). |
 
@@ -257,7 +274,7 @@ vocabulary. `blocked` is a first-class status (recon D1 — the earlier design d
 |---|---|---|---|---|---|---|---|
 | T1 | `UNCLAIMED`/`LAPSED` → `ACTIVE` | `claim` | agent, orchestrator | status claimable (`C-CLAIM-7`), no unfinished blocker (`C-CLAIM-8`), lease free | `+1` | `+1` | 200 + ticket |
 | T2 | `ACTIVE` → `ACTIVE` | `renew_claim` | current holder only | holder + generation match, lease still live (`C-CLAIM-13`) | unchanged | unchanged | 200 + ticket |
-| T3 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `release_claim` | holder; human/orchestrator for anyone | holder + generation match (holder path) | `+1` | `+1` | 200 + ticket |
+| T3 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `release_claim` | holder; human/orchestrator for anyone | holder + generation match (holder path) — **no liveness check**, so a lapsed holder may release (`C-CLAIM-18`) | `+1` | `+1` | 200 + ticket |
 | T4 | `ACTIVE` → `LAPSED` → `UNCLAIMED` | expiry sweep | system | `lease_expires_at <= now` | `+1` | `+1` | audit only |
 | T5 | any → `ACTIVE` | `reassign` | human, orchestrator | `override` required over a live lease (`C-CLAIM-15`) | `+1` | `+1` | 200 + ticket |
 | T6 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `revoke` | human, orchestrator | ticket exists | `+1` | `+1` | 200 + ticket |
@@ -373,13 +390,16 @@ UPDATE tickets
    AND lease_holder IS NOT NULL;
 ```
 
+The absence of `lease_expires_at > :now_ms` in the **release** statement (and its presence in `renew`)
+is `C-CLAIM-18`, not an oversight: release has no clock in its guard, renew has one.
+
 | ID | Rule |
 |---|---|
 | `C-CLAIM-14` | **Renewal never resurrects a lapsed lease.** `lease_expires_at > :now_ms` is part of the `WHERE`. A lapsed holder gets `409 lease_expired` and must re-claim (competing with everyone else). `[LEAD-DECIDED]` — allowing an expired holder to renew would let a zombie process reclaim ownership after the ticket was legitimately swept, and would make `status` disagree with the lease. Guidance for slow agents: renew at 50 % of the TTL (7.5 min), not at expiry. |
 | `C-CLAIM-15` | Renewal does **not** change `version` and does **not** change `lease_generation`. It is a heartbeat, not a state change: bumping `version` on every renewal would make an in-flight editor's `expected_version` fail for no reason. `[LEAD-DECIDED]` |
 | `C-CLAIM-16` | `renew` requires `lease_holder` **and** `lease_generation` to match — the generation alone is never sufficient, because generations are per-ticket and would otherwise let actor B reuse actor A's number on the same ticket. |
 | `C-CLAIM-17` | Release and revoke bump the generation so that a stale claim-protected write from the old holder cannot land on the now-unclaimed ticket (`§3.4`). |
-| `C-CLAIM-18` | `release` with no live claim by that actor returns `409 not_claim_holder` (or `409 lease_expired` if the caller *was* the holder and the lease has lapsed — the diagnosis table in §2.7 decides). |
+| `C-CLAIM-18` | **`release` has no expiry guard; `lease_expired` belongs to `renew` alone.** A release whose `lease_holder` **and** `lease_generation` both match succeeds whether the lease is live or lapsed — the statement above is the whole guard and it contains no clock. A caller that is not the current holder (never was, or was superseded) gets `409 not_claim_holder`; a caller whose holder matches but whose generation is stale gets `409 lease_generation_mismatch`; `409 lease_expired` is returned by `renew` only (`C-CLAIM-14`). `[LEAD-DECIDED]` — release *surrenders* authority instead of extending it, so the danger `C-CLAIM-14` guards against does not exist here: every new claim issues a higher generation (`C-INV-2`, `C-FENCE-9`), so a stale release can never end anyone else's lease, while refusing a lapsed holder would leave a crashed agent with no way to tidy the row it left behind. The asymmetry with `renew` is deliberate; it is not to be "fixed" by adding `lease_expires_at > :now_ms` to the release statement. |
 
 ### 2.6 Expiry sweep
 
@@ -399,7 +419,7 @@ RETURNING id, version, lease_generation;
 | ID | Rule |
 |---|---|
 | `C-CLAIM-19` | The sweep is **optional for correctness** (`C-CLAIM-1`) and idempotent: it can run every minute or never. It must be single-statement with `RETURNING` so the ids and post-values for the audit rows come from the same write, not a prior `SELECT`. |
-| `C-CLAIM-20` | The sweep is performed by the `system` actor and runs on a 60-second ticker inside the server process (a goroutine), plus once on startup. There is no external cron and no second binary. |
+| `C-CLAIM-20` | The sweep is performed by the `system` actor and runs on a ticker of `LEDGERBOARD_SWEEP_INTERVAL_MS` (`C-CONV-10`; default `60000`, i.e. 60 s) inside the server process (a goroutine), plus once on startup. There is no external cron and no second binary. |
 | `C-CLAIM-21` | A sweep must not fight a concurrent renew: the `WHERE lease_expires_at <= :now_ms` is evaluated by SQLite under the write lock, so either the renew commits first (and the lease is live, so the sweep skips it) or the sweep commits first (and the renew's own `lease_expires_at > :now_ms` guard then fails with `409 lease_expired`). Both outcomes are correct; a `500` is not. |
 
 ### 2.7 The 0-row diagnosis table
@@ -419,7 +439,7 @@ lock is still held, so the read is consistent with the statement that just faile
 | | not the holder | `not_claim_holder` | 409 | `ticket_id`, `holder`, `holder_type` |
 | | holder but generation stale | `lease_generation_mismatch` | 409 | `ticket_id`, `expected_generation`, `current_generation` |
 | | holder and generation match but lease lapsed | `lease_expired` | 409 | `ticket_id`, `lease_expires_at`, `current_generation` |
-| | holder, generation, live lease, but status ≠ `in_progress` | `status_not_claimable` | 409 | `ticket_id`, `status` |
+| | holder, generation, live lease, but status ≠ `in_progress` † | `status_not_claimable` | 409 | `ticket_id`, `status` |
 | `release` | ticket absent | `not_found` | 404 | `ticket_id` |
 | | not the holder (never was, or someone else holds it) | `not_claim_holder` | 409 | `ticket_id`, `holder` |
 | | holder but generation stale (superseded) | `lease_generation_mismatch` | 409 | `ticket_id`, `expected_generation`, `current_generation` |
@@ -435,11 +455,24 @@ lock is still held, so the read is consistent with the statement that just faile
 | | claim-protected write by non-holder | `not_claim_holder` | 409 | `ticket_id`, `holder` |
 | | claim-protected write with stale generation | `lease_generation_mismatch` | 409 | `ticket_id`, `expected_generation`, `current_generation` |
 
+† **Defensive row: unreachable in a database the contract can produce.** `C-INV-4` says a live lease
+implies `status = 'in_progress'`, and every statement that ends a claim clears the holder in the same
+row update, so no sequence of contract operations can reach this row's precondition. It stays because a
+`500` (`C-CLAIM-23`) is a worse answer than a truthful 409 if an invariant is ever broken, and because
+the store must not crash on a row a direct `UPDATE` produced. QA covers it with a direct-SQL fixture,
+never through a transport (`C-CLAIM-25`).
+
+Two operations deliberately have **no** `lease_expired` row, and the absence is normative: `release` —
+a lapsed holder with the current generation **succeeds**, because the release statement has no clock in
+it (`C-CLAIM-18`) — and `revoke`, which has no holder guard at all. A diagnosis table that grows a
+`lease_expired` row for `release` has contradicted `C-CLAIM-18`.
+
 | ID | Rule |
 |---|---|
 | `C-CLAIM-22` | The diagnosis order in the table is normative: the **first** matching row is the error returned. "Ticket absent" is always first (404 before 409). |
 | `C-CLAIM-23` | If the diagnosis SELECT finds nothing to explain the 0 rows, that is a `500 internal` and a logged defect — it means the guard and the diagnosis disagree, which must never happen silently. |
 | `C-CLAIM-24` | A 0-row result is never retried automatically inside the store. Retry policy belongs to the caller (the agent), and only for `database_busy`. |
+| `C-CLAIM-25` | The † row is defensive-only and must not be cited as a reachable outcome. The **reachable** path to `409 lease_generation_mismatch` on a content edit is a generation bump that leaves `lease_holder` unchanged, so the guard's holder arm (`C-GUARD-2`) matches and its generation arm does not: (a) a human/orchestrator `reassign` to the ticket's own current holder (T8), or (b) the same actor releasing and re-claiming, so a request still in flight from before carries a generation that is no longer current. Every other generation change also changes the holder (§3.3, `C-INV-2`), so those surface as `not_claim_holder` or `already_claimed` instead. Tests use (a) deliberately. |
 
 ### 2.8 Invariants
 
@@ -572,9 +605,10 @@ alike. The summary:
 | `C-IDEM-13` | Consequently a crash can only produce: (a) no key row and no mutation — a retry executes cleanly; or (b) both — a retry replays. It can never produce a mutation whose response was lost while the key row says it succeeded, because both commit together. `[LEAD-DECIDED]` — this is why the design needs no two-phase "in flight" reconciliation. |
 | `C-IDEM-14` | `status` has two values, `in_flight` and `completed`. `in_flight` exists only inside an uncommitted transaction and is therefore **never observable after commit**; if a reader ever sees it, the row is stale and the request is treated as retryable (`C-IDEM-8`). The column exists so the schema states the intent and a future multi-process deployment can keep the same shape. |
 | `C-IDEM-15` | Two concurrent requests with the same key: the second blocks on the write lock (up to `busy_timeout`), then finds the completed row and replays it. It must **not** return `409 idempotency_in_progress` merely because the first is still running unless the wait exceeded `busy_timeout`, in which case the response is `503 database_busy` (retryable, `C-ERR-8`). |
-| `C-IDEM-16` | Retention is **72 hours** (`expires_at = created_at + 259_200_000`). Purge runs (a) on startup and (b) opportunistically at most once every 10 minutes inside a write transaction, deleting `WHERE expires_at < :now_ms`. A purge never runs inside a request that is itself being deduplicated. `[LEAD-DECIDED]` — the spec says "e.g. 72h"; a fixed 72 h is what the docs and tests assert. |
+| `C-IDEM-16` | Retention is **72 hours** (`expires_at = created_at + 259_200_000`). Purge runs (a) on startup and (b) opportunistically at most once every 10 minutes inside a write transaction, deleting `WHERE expires_at < :now_ms`. A purge never runs inside a request that is itself being deduplicated. The 10-minute rate limit lives in **process memory** — one `last_purge_ms` value on the store, no table and no column — so each server process keeps its own schedule and two processes on one database may both purge. That is safe and intended: a purge is one idempotent `DELETE` under the single writer (`C-CONV-3`), and **no correctness depends on it running at all** (`C-IDEM-19`), so the shared-state question is deliberately not answered with shared state. `[LEAD-DECIDED]` — the spec says "e.g. 72h"; a fixed 72 h is what the docs and tests assert. |
 | `C-IDEM-17` | Keys are **server-side only**: never exposed as a URL path segment, never echoed in an error other than `C-IDEM-7`'s details, never written to the audit payload (only `request_id` is), and never used as an entity id. |
 | `C-IDEM-18` | Purging a key never affects the entity it created. After expiry, the same key is simply a new request again — which is the documented consequence of a 72 h window and must be stated in the API docs. |
+| `C-IDEM-19` | **An expired key row behaves as absent, purged or not.** `C-IDEM-16` is housekeeping, not the expiry mechanism: a request whose key matches a row with `expires_at <= :now_ms` executes as a new request (`C-IDEM-18`) even if no purge has run. The order is: attempt the `INSERT` of the new key row; if it fails on the primary key (`C-SCHEMA-17`), re-read that row **for diagnosis only**, and if it is expired, `DELETE` it and `INSERT` again inside the same transaction. Both writes are unconditional — the read never decides *whether* to write, only which error it is explaining (`C-CONV-4`). A duplicate against an unexpired row is the ordinary replay/conflict path (`C-IDEM-6`, `C-IDEM-7`). This is what makes the purge best-effort and its state in-process (`C-IDEM-16`). |
 
 ---
 
@@ -655,7 +689,7 @@ alike. The summary:
 
 | ID | Rule |
 |---|---|
-| `C-HANDOFF-9` | The **canonical form** is the v1 document with object keys sorted, no insignificant whitespace, arrays in submitted order, `null` omitted for optional fields, and times rendered with three fractional digits. Its SHA-256 is stored in `handoffs.checksum` (`C-SCHEMA-10`) and is what a client can compare to detect any change. |
+| `C-HANDOFF-9` | **The checksummed field set is the creation-time fields, and it is exactly these seventeen:** `schema_version`, `id`, `ticket_id`, `board_id`, `from_actor`, `from_actor_type`, `to_actor`, `generation`, `supersedes`, `summary`, `done`, `next`, `blockers`, `artifacts`, `memory_writes`, `memory_refs`, `created_at`. `status`, `accepted_by` and `accepted_at` are **outside** the hash, because `accept` and supersession write them and a checksum that moved on a legitimate transition would report drift on every accept. The rule is stated by mutability rather than by authorship: every field fixed at creation is inside, every field the two permitted transitions write is outside, and `C-SCHEMA-9` is what protects the excluded three. The **canonical form** is that set rendered with object keys sorted by byte value, no insignificant whitespace, arrays in submitted order, `null`-valued optional fields omitted, and `created_at` with three fractional digits; its lowercase hex SHA-256 is `handoffs.checksum` (`C-SCHEMA-10`), recomputed from the typed columns and never from a stored copy of the document, so a client can detect drift in any creation-time field at any point in the handoff's life. |
 | `C-HANDOFF-10` | **Handoffs are immutable under ordinary operations.** There is no update path, no field patch, and no delete. The only writes after creation are the acceptance transition (`status`, `accepted_by`, `accepted_at`) and supersession (`status` → `superseded`). |
 | `C-HANDOFF-11` | A **correction is a new handoff** with `supersedes = <old id>`; the old row's `status` becomes `superseded` in the same transaction. The chain is walked newest-first and must not contain a cycle; a cycle attempt → `400 handoff_invalid`. |
 | `C-HANDOFF-12` | The `supersedes` chain is scoped to one ticket: superseding a handoff that belongs to a different ticket → `400 handoff_invalid`. |
@@ -819,7 +853,7 @@ RETURNING id, ticket_id, handoff_id, actor, actor_type, memory_type,
 | `C-OUTBOX-14` | `MEMORY_DELIVERY` accepts exactly `off` and `worker`; the default is **`off`** (spec §10). Any other value is a startup error, not a silent fallback. |
 | `C-OUTBOX-15` | With `off`: no worker goroutine starts, **and outbox rows are still created and visible**. Nothing is delivered, nothing is marked `failed`, nothing is dropped. `GET /api/v1/outbox` returns the backlog. |
 | `C-OUTBOX-16` | Switching from `off` to `worker` later delivers the whole backlog in `created_at` order — that is the intended path once the operator's memory server is reachable. No migration or replay command is needed. |
-| `C-OUTBOX-17` | With `worker`: exactly one goroutine loop per process claims one row at a time (the single writer connection serialises anyway), sleeping 1 s when nothing is claimable. A second process on the same database is safe (`C-OUTBOX-5`) but wasteful; the docs say so rather than pretending it is unsupported. |
+| `C-OUTBOX-17` | With `worker`: exactly one goroutine loop per process claims one row at a time (the single writer connection serialises anyway), sleeping `LEDGERBOARD_WORKER_POLL_MS` (`C-CONV-10`, default `1000` ms) when nothing is claimable. The sleep is a `select` on the worker's shutdown context, so shutdown never waits out a poll interval. A second process on the same database is safe (`C-OUTBOX-5`) but wasteful; the docs say so rather than pretending it is unsupported. |
 | `C-OUTBOX-18` | The worker must never start when the adapter is not configured: `MEMORY_DELIVERY=worker` with no adapter is a **startup error**, because a worker that immediately fails every row would turn a configuration mistake into a pile of dead letters. |
 
 ### 6.6 The adapter interface
@@ -958,7 +992,7 @@ type DeliveryError struct {
 | `already_claimed` | 409 | a live lease is held by another actor | `C-ERR-4` set + `override_required:true` on `reassign` |
 | `not_claimed` | 409 | `revoke` with nothing to revoke | `ticket_id` |
 | `not_claim_holder` | 409 | caller is not the current holder | `ticket_id`, `holder`, `holder_type` |
-| `lease_expired` | 409 | caller was the holder but the lease lapsed | `ticket_id`, `lease_expires_at`, `lease_generation` |
+| `lease_expired` | 409 | `renew` by the holder after the lease lapsed (`C-CLAIM-14`); **never** `release`, which has no expiry guard (`C-CLAIM-18`) | `ticket_id`, `lease_expires_at`, `lease_generation` |
 | `lease_generation_mismatch` | 409 | fencing token stale | `ticket_id`, `expected_generation`, `current_generation` |
 | `version_conflict` | 409 | `expected_version` stale | `ticket_id`, `expected_version`, `current_version` |
 | `status_not_claimable` | 409 | claim on `done`/`blocked`/non-claimable status | `ticket_id`, `status`, `claimable_statuses[]` |
@@ -1016,7 +1050,7 @@ type DeliveryError struct {
 
 | ID | Rule |
 |---|---|
-| `C-AUTH-7` | The four "no" cells for `agent` are the whole point of the actor types: an agent cannot give itself a ticket it did not win, cannot clear a claim that is not its own, and cannot unblock work a human blocked. Each is a `403 forbidden` — a *capability* failure — never a 409. |
+| `C-AUTH-7` | The `agent` column has **five** "no" cells, and each is a `403 forbidden` — a *capability* failure — never a 409: create/edit/delete boards or epics (structure is the operator's, `C-AUTH-9`); **reassign** (an agent cannot give itself a ticket it did not win); **revoke** (it cannot clear a claim that is not its own); **unblock** (it cannot undo a block a human set, `C-CLAIM-2`); and retry a dead-lettered memory write (dead-letter recovery is an operator decision, `C-OUTBOX-13`). The table's other agent-restricted line, changing `MEMORY_DELIVERY`, is "no" for all four actor types — it is configuration rather than a capability cell, so it is not counted here. Count them from §8.2, not from this sentence. |
 | `C-AUTH-8` | `orchestrator` is a human-equivalent for overrides (it is the human's fleet controller) but is **fenced** on content writes if it also holds the lease; it may hold a lease like an agent. `[LEAD-DECIDED]` — spec §13 lists orchestrator alongside agent for claim-like behaviour and alongside human for override behaviour; this is the smallest reading that satisfies both. |
 | `C-AUTH-9` | An `agent` may create tickets (that is how a fleet files follow-up work) but may not create boards or epics (structure stays human). `[LEAD-DECIDED]` — the alternative (agents create boards) has no user, and a board is the operator's organisational unit. |
 
