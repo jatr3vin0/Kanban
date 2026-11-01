@@ -92,3 +92,49 @@ $ go test ./internal/store/ -count=1 -v -run "TestIdempotency|TestHandoff"
 --- PASS: TestIdempotencyCrashAtomicity (0.12s)
 ok  	github.com/rgracey/kanban-mcp/internal/store	0.437s
 ```
+
+## full-suite re-verification (pre-PR, full repo, all packages)
+Run before opening the PR, on the same tree that is being pushed. Confirms the earlier
+section above: nothing outside `internal/store` regressed from the slice 2 changes.
+```
+$ go version
+go version go1.25.5 linux/amd64
+$ gofmt -l .
+exit=0 (no files listed)
+$ go build ./...
+exit=0 (no output)
+$ go vet ./...
+exit=0 (no output)
+$ go test ./... -count=1
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.055s
+?   	github.com/rgracey/kanban-mcp/internal/apperr	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/config	0.004s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.008s
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.188s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.076s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.921s
+exit=0
+```
+
+### counts from that run (`go test ./... -count=1 -json`)
+| package | top-level pass | subtest pass | fail | skip |
+|---|---|---|---|---|
+| internal/api | 4 | 43 | 0 | 0 |
+| internal/clocksource | 5 | 0 | 0 | 0 |
+| internal/config | 8 | 0 | 0 | 0 |
+| internal/crashpoint | 6 | 0 | 0 | 1 |
+| internal/db | 12 | 2 | 0 | 0 |
+| internal/mcp | 10 | 0 | 0 | 0 |
+| internal/store | 47 | 48 | 0 | 1 |
+| **total** | **92** | **93** | **0** | **2** |
+
+The two skips are the re-exec helper tests (`TestCrashHelperProcess`,
+`TestIdempotencyCrashChild`), which no-op unless the harness sets their child env var —
+they are the subprocess legs of `TestCrashAtomicity` and `TestIdempotencyCrashAtomicity`,
+both of which pass. `internal/store` went from 26 to 48 test functions with slice 2:
+10 in `handoff_test.go` and 12 in `idempotency_test.go`, of which one
+(`TestIdempotencyCrashChild`) is the re-exec helper above, so 47 pass and 1 skips.
