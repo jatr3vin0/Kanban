@@ -229,7 +229,7 @@ All payloads are JSON objects. `generation` is the **post**-transition generatio
 |---|---|---|
 | `claimed` | a claim or `claim_next` succeeds | `{"request_id","generation","actor_type","lease_expires_at":<ms>,"previous_holder":<string\|null>,"previous_generation":<int>,"source":"claim"\|"claim_next"}` |
 | `claim_renewed` | a renewal succeeds | `{"request_id","generation","previous_expires_at":<ms>,"lease_expires_at":<ms>,"renewals":<int>}` |
-| `claim_released` | holder release, human release, or expiry sweep | `{"request_id","generation","previous_holder","actor_type","status_from","status_to","reason":"release"\|"expiry"\|"override"\|"status"}` |
+| `claim_released` | a holder's own release (any actor type that can hold the lease), expiry sweep, or a status change that ends the claim | `{"request_id","generation","previous_holder","actor_type","status_from","status_to","reason":"release"\|"expiry"\|"status"}` |
 | `claim_reassigned` | human/orchestrator reassign (incl. takeover of a live lease) | `{"request_id","generation","previous_generation","from_holder":<string\|null>,"to_holder","to_holder_type","lease_expires_at":<ms>,"override":<bool>}` |
 | `claim_revoked` | human/orchestrator revoke (claim dies, ticket stays as it is) | `{"request_id","generation","previous_holder","reason"}` |
 | `handoff_created` | handoff accepted at creation time | `{"request_id","handoff_id","generation","schema_version":1,"to_actor":<string\|null>,"supersedes":<string\|null>}` |
@@ -274,9 +274,9 @@ vocabulary. `blocked` is a first-class status (recon D1 — the earlier design d
 |---|---|---|---|---|---|---|---|
 | T1 | `UNCLAIMED`/`LAPSED` → `ACTIVE` | `claim` | agent, orchestrator | status claimable (`C-CLAIM-7`), no unfinished blocker (`C-CLAIM-8`), lease free | `+1` | `+1` | 200 + ticket |
 | T2 | `ACTIVE` → `ACTIVE` | `renew_claim` | current holder only | holder + generation match, lease still live (`C-CLAIM-13`) | unchanged | unchanged | 200 + ticket |
-| T3 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `release_claim` | holder only — **any actor type may hold**, so whoever holds the lease releases its own claim (`C-AUTH-1`); a caller that is not the holder gets `409 not_claim_holder` (`C-CLAIM-18`). A human or orchestrator taking work away from *someone else* does not use `release`: it uses `reassign` (T5) or `revoke` (T6), which need no holder guard (`C-CLAIM-15`, `C-GUARD-8`) | holder + generation match (holder path) — **no liveness check**, so a lapsed holder may release (`C-CLAIM-18`) | `+1` | `+1` | 200 + ticket |
+| T3 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `release_claim` | holder only — whoever holds the lease releases its own claim, whatever its actor type: agents and orchestrators take a lease by claiming (T1), a human by handoff accept (`C-HANDOFF-16`, T7) or reassign to self (T8). A caller that is not the holder gets `409 not_claim_holder` (`C-CLAIM-18`). A human or orchestrator taking work away from *someone else* does not use `release`: it uses `reassign` (T5) or `revoke` (T6), which need no holder guard (`C-GUARD-7`, `C-GUARD-8`) | holder + generation match (holder path) — **no liveness check**, so a lapsed holder may release (`C-CLAIM-18`) | `+1` | `+1` | 200 + ticket |
 | T4 | `ACTIVE` → `LAPSED` → `UNCLAIMED` | expiry sweep | system | `lease_expires_at <= now` | `+1` | `+1` | audit only |
-| T5 | any → `ACTIVE` | `reassign` | human, orchestrator | `override` required over a live lease (`C-CLAIM-15`) | `+1` | `+1` | 200 + ticket |
+| T5 | any → `ACTIVE` | `reassign` | human, orchestrator | `override` required over a live lease (`C-GUARD-7`); the new generation kills the old holder's token (`C-GUARD-8`) | `+1` | `+1` | 200 + ticket |
 | T6 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `revoke` | human, orchestrator | ticket exists | `+1` | `+1` | 200 + ticket |
 | T7 | `ACTIVE` → `ACTIVE` | `handoff` accept | current holder → `to_actor`, or claimer of an offered handoff | holder + generation match, or offered handoff | `+1` | `+1` | 200 + handoff |
 | T8 | `ACTIVE` → `ACTIVE` | human takeover (reassign to self) | human | same as T5 | `+1` | `+1` | 200 + ticket |
@@ -559,7 +559,7 @@ defect to fix** — that includes the §8.2 authorization cells below, not only 
 
 | ID | Rule |
 |---|---|
-| `C-FENCE-11` | Human/orchestrator overrides are classified by whether they change **ownership-bearing state**, and only those bump the generation: `reassign`, `release`, `revoke`, status change to/from `done` or `blocked`, and `unblock`. A pure **content edit** by a human bumps `version` only. `[LEAD-DECIDED]` — read literally, §5.5 would kick an agent off its ticket because a human fixed a typo in the description, which would make the board unusable; the version bump already forces the agent to re-read before its next write, so no stale write survives. The classification is a single table in the service layer, so if the owner wants the literal reading it is a one-row change, not a redesign. **Flagged for the owner** — see `[OWNER-1]` in §10. |
+| `C-FENCE-11` | Overrides and ownership-bearing writes are classified by whether they change **ownership-bearing state**, and only those bump the generation: `reassign`, `revoke`, a holder's own `release` (`C-CLAIM-18`), status change to/from `done` or `blocked`, and `unblock`. A pure **content edit** by a human bumps `version` only. `[LEAD-DECIDED]` — read literally, §5.5 would kick an agent off its ticket because a human fixed a typo in the description, which would make the board unusable; the version bump already forces the agent to re-read before its next write, so no stale write survives. The classification is a single table in the service layer, so if the owner wants the literal reading it is a one-row change, not a redesign. **Flagged for the owner** — see `[OWNER-1]` in §10. |
 | `C-FENCE-12` | An agent can never present itself as a human: the actor type comes from server configuration (`C-AUTH-1`), never from the request body. Any `actor`, `actor_type`, `generation` or `lease_*` field in a request body is ignored and reported as an unknown field (`C-COMPAT-5`). |
 
 ---
@@ -1041,7 +1041,8 @@ type DeliveryError struct {
 | Create tickets (single, bulk) | yes | yes | yes | no |
 | **Claim a ticket** | **no** (`403`) | yes | yes | internal only |
 | Renew / release own claim | yes, when it holds one (T8, handoff accept) | yes | yes | no |
-| Edit ticket content / status / tasks / notes / relations | yes, unfenced | yes, **fenced** (`C-FENCE-2`) | yes, **fenced** (`C-FENCE-2`) | no |
+| Edit ticket content / status / delete | yes, unfenced | yes, **fenced** (`C-FENCE-2`, `C-GUARD-4`) | yes, **fenced** (`C-FENCE-2`, `C-GUARD-4`) | no |
+| Edit tasks / notes / relations (ticket children) | yes, **open** | yes, **open** (`C-OPEN-1`–`C-OPEN-4`) | yes, **open** | no |
 | Create a handoff | yes | yes, fenced | yes | no |
 | Accept a handoff | yes | yes (if addressed or `to_actor` null) | yes | no |
 | **Reassign** a ticket (override a live claim) | yes | **no** (`403`) | yes | no |
@@ -1061,7 +1062,7 @@ type DeliveryError struct {
 
 | ID | Rule |
 |---|---|
-| `C-AUTH-10` | The distinction is exactly `actor_type` on the request identity plus the capability table. A `human` override on a claimed ticket is audited as `claim_reassigned` / `claim_released` / `claim_revoked` with `override:true` and `actor` = `human:<id>`; an agent's own release is the same event type with `reason:"release"` and `override` absent. The audit trail therefore answers "who" for the first time (recon §5.1: `actor` was always `''`). |
+| `C-AUTH-10` | The distinction is exactly `actor_type` on the request identity plus the capability table. A `human` or `orchestrator` override on a claimed ticket is audited as `claim_reassigned` — with `override:true` when a live lease existed (`C-GUARD-7`) — or as `claim_revoked` (`C-GUARD-8`), and `actor` always names the actor that performed it (`human:<id>` / `orchestrator:<id>`); a holder's own release, by any actor type that can hold a lease (T3), is `claim_released` with `reason:"release"` and no `override` field. There is no non-holder `claim_released` path: taking work away from another actor is `reassign` (T5) or `revoke` (T6). The audit trail therefore answers "who" for the first time (recon §5.1: `actor` was always `''`). |
 | `C-AUTH-11` | "Agents cannot impersonate humans" (spec §5.5) is enforced by `C-AUTH-1`/`C-AUTH-6`: there is no request field that sets the actor type, and `system` is rejected outright. Under v1's trusted-local model this prevents mistakes and sloppy clients, not a determined local attacker (`C-AUTH-5`). |
 | `C-AUTH-12` | The existing `assignee` field is **not** an identity: it stays free text, writable by anyone, and never grants or revokes authority (`C-SCHEMA-5`). The UI may display the claimant next to the assignee label, but the two are never conflated. |
 
