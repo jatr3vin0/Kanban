@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -524,8 +525,9 @@ func TestMP_T_MIG_04(t *testing.T) {
 	serverBin := ServerBin(t)
 	fixturePath, before := fixtureOnce(t)
 	downSQL := AbsFromRepo(t, "internal/db/migrations/0002_lease.down.sql")
-	raw, err := os.ReadFile(downSQL)
-	require.NoError(t, err)
+	if _, err := os.ReadFile(downSQL); err != nil {
+		t.Fatalf("contracted down SQL must exist and be readable: %v", err)
+	}
 	SaveEvidence(t, ev, "header.txt",
 		"CONTRACTED DATA LOSS: the down migration destroys lease, handoff, outbox and idempotency rows by design (C-SCHEMA-4). It is never invoked automatically; here it is executed explicitly, by its exact contracted text.\n")
 
