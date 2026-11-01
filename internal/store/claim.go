@@ -90,6 +90,79 @@ func (s *SQLiteStore) Claim(ctx context.Context, req ClaimRequest) (ClaimedTicke
 	}
 	defer tx.Rollback()
 
+	ticket, err := s.claimInTx(ctx, tx, req, nowMS)
+	if err != nil {
+		return ClaimedTicket{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ClaimedTicket{}, mapDriverErr(err)
+	}
+	// Armed, this kills the process after COMMIT: the claim and its audit row
+	// must both survive the restart.
+	crashpoint.Hit(crashpoint.ClaimPostCommit)
+	return ticket, nil
+}
+
+// ClaimIdempotent is Claim executed under an idempotency scope (§4.1:
+// `ticket.claim`, key required — C-IDEM-4).
+//
+// The claim, its `claimed` audit row and the idempotency key row all commit in
+// the same transaction (C-IDEM-12), so a crash leaves either nothing or
+// everything (C-IDEM-13). A replay returns the recorded response and does not
+// re-run the mutation, re-publish SSE or write a second audit row (C-IDEM-6,
+// C-IDEM-9).
+func (s *SQLiteStore) ClaimIdempotent(ctx context.Context, req ClaimRequest, scope IdempotencyScope) (ClaimedTicket, bool, error) {
+	if err := s.requireClaimingActor(req.Actor); err != nil {
+		return ClaimedTicket{}, false, err
+	}
+	if scope.Actor.String() != req.Actor.String() {
+		return ClaimedTicket{}, false, apperr.WithDetails(apperr.CodeInternal,
+			"idempotency scope actor disagrees with the request actor", map[string]any{"field": "actor"})
+	}
+	scope.Operation = OperationTicketClaim
+	if scope.Key != "" && scope.RequestHash == "" {
+		return ClaimedTicket{}, false, apperr.WithDetails(apperr.CodeInvalidRequest,
+			"request_hash is required with an idempotency key (C-IDEM-10)",
+			map[string]any{"field": "request_hash"})
+	}
+	nowMS := s.clock.NowMS()
+
+	var claimed ClaimedTicket
+	res, err := s.RunIdempotent(ctx, scope, func(ctx context.Context, tx *sql.Tx) (StoredResponse, error) {
+		ticket, err := s.claimInTx(ctx, tx, req, nowMS)
+		if err != nil {
+			return StoredResponse{}, err
+		}
+		body, err := json.Marshal(ticket)
+		if err != nil {
+			return StoredResponse{}, err
+		}
+		claimed = ticket
+		return StoredResponse{Status: 200, Body: body, EntityID: ticket.ID}, nil
+	})
+	if err != nil {
+		return ClaimedTicket{}, false, err
+	}
+
+	if res.Replayed {
+		var replayed ClaimedTicket
+		if err := json.Unmarshal(res.Response.Body, &replayed); err != nil {
+			return ClaimedTicket{}, false, apperr.New(apperr.CodeInternal,
+				"recorded claim response could not be decoded (C-SCHEMA-18)")
+		}
+		return replayed, true, nil
+	}
+	// Armed, this kills the process after COMMIT: the claim, its audit row and
+	// its key row must all survive the restart (C-IDEM-13).
+	crashpoint.Hit(crashpoint.ClaimPostCommit)
+	return claimed, false, nil
+}
+
+// claimInTx is the body of Claim without the transaction boundary, so the
+// idempotent path can run the same mutation inside a transaction it shares with
+// the key row (C-IDEM-12). It never commits: the caller owns the transaction.
+func (s *SQLiteStore) claimInTx(ctx context.Context, tx *sql.Tx, req ClaimRequest, nowMS int64) (ClaimedTicket, error) {
 	// The row is read once, inside the write transaction, for two purposes only:
 	// the audit payload's pre-transition values and, when the UPDATE affects no
 	// rows, the diagnosis. It never decides whether to write (C-CONV-4): the
@@ -117,10 +190,6 @@ func (s *SQLiteStore) Claim(ctx context.Context, req ClaimRequest) (ClaimedTicke
 		return ClaimedTicket{}, apperr.New(apperr.CodeInternal, "claim updated more than one ticket")
 	}
 
-	// Armed, this kills the process before COMMIT: neither the claim nor its
-	// audit row may survive (C-CONV-3, C-AUDIT-4).
-	crashpoint.Hit(crashpoint.ClaimPreCommit)
-
 	ticket, _, err := readClaimedTicket(ctx, tx, req.TicketID, nowMS)
 	if err != nil {
 		return ClaimedTicket{}, err
@@ -136,13 +205,12 @@ func (s *SQLiteStore) Claim(ctx context.Context, req ClaimRequest) (ClaimedTicke
 	}, nowMS); err != nil {
 		return ClaimedTicket{}, err
 	}
-
-	if err := tx.Commit(); err != nil {
-		return ClaimedTicket{}, mapDriverErr(err)
-	}
-	// Armed, this kills the process after COMMIT: the claim and its audit row
-	// must both survive the restart.
-	crashpoint.Hit(crashpoint.ClaimPostCommit)
+	// Armed, this kills the process before COMMIT: the claim, its audit row and
+	// everything else staged here must not survive (C-CONV-3, C-AUDIT-4). It is
+	// fired after insertAudit so the crash test's "no audit row survived"
+	// assertion can actually fail; the point keeps its name and its meaning
+	// (T-IDEM-05, C-IDEM-12).
+	crashpoint.Hit(crashpoint.ClaimPreCommit)
 	return ticket, nil
 }
 
@@ -165,6 +233,60 @@ func (s *SQLiteStore) ClaimNext(ctx context.Context, req ClaimNextRequest) (Clai
 	}
 	defer tx.Rollback()
 
+	ticket, err := s.claimNextInTx(ctx, tx, req, nowMS)
+	if err != nil {
+		return ClaimedTicket{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ClaimedTicket{}, mapDriverErr(err)
+	}
+	crashpoint.Hit(crashpoint.ClaimPostCommit)
+	return ticket, nil
+}
+
+// ClaimNextIdempotent is ClaimNext executed under an idempotency scope (§4.1:
+// `ticket.claim`, key required — C-IDEM-4). The claimed row, its audit row and
+// the key row commit together (C-IDEM-12).
+func (s *SQLiteStore) ClaimNextIdempotent(ctx context.Context, req ClaimNextRequest, scope IdempotencyScope) (ClaimedTicket, bool, error) {
+	if err := s.requireClaimingActor(req.Actor); err != nil {
+		return ClaimedTicket{}, false, err
+	}
+	scope.Operation = OperationTicketClaim
+	nowMS := s.clock.NowMS()
+
+	var claimed ClaimedTicket
+	res, err := s.RunIdempotent(ctx, scope, func(ctx context.Context, tx *sql.Tx) (StoredResponse, error) {
+		ticket, err := s.claimNextInTx(ctx, tx, req, nowMS)
+		if err != nil {
+			return StoredResponse{}, err
+		}
+		body, err := json.Marshal(ticket)
+		if err != nil {
+			return StoredResponse{}, err
+		}
+		claimed = ticket
+		return StoredResponse{Status: 200, Body: body, EntityID: ticket.ID}, nil
+	})
+	if err != nil {
+		return ClaimedTicket{}, false, err
+	}
+	if res.Replayed {
+		var replayed ClaimedTicket
+		if err := json.Unmarshal(res.Response.Body, &replayed); err != nil {
+			return ClaimedTicket{}, false, apperr.New(apperr.CodeInternal,
+				"recorded claim_next response could not be decoded (C-SCHEMA-18)")
+		}
+		return replayed, true, nil
+	}
+	crashpoint.Hit(crashpoint.ClaimPostCommit)
+	return claimed, false, nil
+}
+
+// claimNextInTx is the body of ClaimNext without the transaction boundary, so
+// the idempotent path can run it inside the transaction that also carries the
+// key row (C-IDEM-12).
+func (s *SQLiteStore) claimNextInTx(ctx context.Context, tx *sql.Tx, req ClaimNextRequest, nowMS int64) (ClaimedTicket, error) {
 	// The pre-transition values the §1.8 `claimed` payload must report are read
 	// once, inside the write transaction and before the mutation (C-CONV-4 as
 	// amended by A1). This read decides nothing — the UPDATE below picks the
@@ -201,7 +323,6 @@ func (s *SQLiteStore) ClaimNext(ctx context.Context, req ClaimNextRequest) (Clai
 		return ClaimedTicket{}, apperr.New(apperr.CodeInternal,
 			"claim_next pre-read disagreed with the claim statement")
 	}
-	crashpoint.Hit(crashpoint.ClaimPreCommit)
 
 	ticket, _, err := readClaimedTicket(ctx, tx, id, nowMS)
 	if err != nil {
@@ -223,11 +344,10 @@ func (s *SQLiteStore) ClaimNext(ctx context.Context, req ClaimNextRequest) (Clai
 	}, nowMS); err != nil {
 		return ClaimedTicket{}, err
 	}
-
-	if err := tx.Commit(); err != nil {
-		return ClaimedTicket{}, mapDriverErr(err)
-	}
-	crashpoint.Hit(crashpoint.ClaimPostCommit)
+	// Armed, this kills the process before COMMIT: fired after insertAudit for
+	// the same reason as in claimInTx, so the audit row is staged and the
+	// rollback must take it (T-IDEM-05, C-AUDIT-4).
+	crashpoint.Hit(crashpoint.ClaimPreCommit)
 	return ticket, nil
 }
 
@@ -245,6 +365,12 @@ func (s *SQLiteStore) RenewClaim(ctx context.Context, req RenewRequest) (Claimed
 		return ClaimedTicket{}, mapDriverErr(err)
 	}
 	defer tx.Rollback()
+
+	// C-IDEM-16(b): this write transaction is not itself being deduplicated, so it
+	// may carry the opportunistic purge. The 10-minute rate limit is in-process.
+	if _, err := s.MaybePurgeIdempotencyTx(ctx, tx, nowMS); err != nil {
+		return ClaimedTicket{}, err
+	}
 
 	prior, found, err := readClaimedTicket(ctx, tx, req.TicketID, nowMS)
 	if err != nil {
@@ -314,6 +440,12 @@ func (s *SQLiteStore) ReleaseClaim(ctx context.Context, req ReleaseRequest) (Cla
 		return ClaimedTicket{}, mapDriverErr(err)
 	}
 	defer tx.Rollback()
+
+	// C-IDEM-16(b): this write transaction is not itself being deduplicated, so it
+	// may carry the opportunistic purge. The 10-minute rate limit is in-process.
+	if _, err := s.MaybePurgeIdempotencyTx(ctx, tx, nowMS); err != nil {
+		return ClaimedTicket{}, err
+	}
 
 	prior, found, err := readClaimedTicket(ctx, tx, req.TicketID, nowMS)
 	if err != nil {
