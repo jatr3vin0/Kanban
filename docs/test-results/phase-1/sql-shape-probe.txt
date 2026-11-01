@@ -1,0 +1,65 @@
+# Phase 1 — contract SQL probe
+# 2026-10-31T03:06:19Z · Go go1.27.3 · modernc.org/sqlite v1.46.1 (SQLite 3.51.2)
+# Scratch DB: /tmp/lb-probe/probe.db (never in the repo)
+# The probe applies internal/db/migrations/0001_init.up.sql, then the 0002_lease DDL and
+# every statement quoted in docs/contracts.md, then the 0002 down migration.
+# It is a throwaway program in /tmp; it is not part of the module and is not committed.
+
+ok   read 0001_init.up.sql
+ok   open writer db
+ok   apply 0001 base schema
+ok   apply 0002_lease.up.sql (multi-statement, ALTER ADD COLUMN only)
+ok   pragmas on writer conn: busy_timeout=5000 foreign_keys=1
+ok   concurrent claim on t1: rows affected per claimant = [0 1] (sum must be 1)
+ok   concurrent winner holds t1 as "agent-1" gen=1
+ok   renew with wrong generation executes
+ok   renew with stale generation -> 0 rows (must be 0)
+ok   renew live lease
+ok   renew by holder gen=1 -> 1 rows (must be 1)
+ok   renew expired lease executes
+ok   renew of expired lease -> 0 rows (must be 0: renew never resurrects)
+ok   claim expired lease
+ok   claim over expired lease -> 1 rows (must be 1)
+ok   sweep expired leases RETURNING
+ok   swept t1 -> version=4 generation=3
+ok   sweep affected 1 row(s)
+ok   set t2 blocked
+ok   claim blocked ticket executes
+ok   claim of blocked ticket -> 0 rows (must be 0)
+ok   add blocking relation t3 -> t1
+ok   claim dependent ticket executes
+ok   claim of ticket blocked by unfinished dependency -> 0 rows (must be 0)
+ok   complete blocking dependency t3
+ok   re-claim t1 before release test
+ok   re-claim of swept ticket -> 1 rows (must be 1)
+ok   release by holder
+ok   release by holder "agent-5" gen=4 -> 1 rows (must be 1)
+ok   after release: generation 4 -> 5 (must increase), holder set=false, status=todo
+ok   stale release executes
+ok   stale release with dead generation -> 0 rows (must be 0)
+ok   reassign over non-claimed ticket
+ok   reassign t2 (status=blocked, unclaimed) -> 1 rows (must be 1)
+ok   reassign over live claim without force
+ok   reassign over a live claim without override -> 0 rows (must be 0)
+ok   reassign with override
+ok   reassign with override -> 1 rows (must be 1)
+ok   reset t3 to todo
+ok   claim_next with RETURNING
+ok   claim_next picked t3 gen=1 version=2
+ok   version-guarded update with current version
+ok   version-guarded update version=2 -> 1 rows (must be 1)
+ok   version-guarded update with stale version executes
+ok   version-guarded update with stale version -> 0 rows (must be 0)
+ok   create orphan in_progress ticket t2
+ok   claim orphan in_progress ticket executes
+ok   claim of in_progress ticket with no lease -> 1 rows (must be 1)
+ok   begin handoff tx
+ok   commit handoff+outbox tx
+ok   delete ticket t1 (cascades handoffs, not outbox)
+ok   after ticket delete: handoffs=0 (cascade), outbox=1 (survives, no FK)
+ok   duplicate (actor,operation,key) rejected: true
+ok   outbox claim with lease + RETURNING
+ok   apply 0002_lease.down.sql
+ok   after down: tickets columns = [id board_id epic_id title description status priority assignee resolution created_at updated_at]
+ok   after down: new tables remaining = 0 (must be 0)
+ok   foreign_key_check clean
