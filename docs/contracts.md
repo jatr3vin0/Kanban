@@ -274,7 +274,7 @@ vocabulary. `blocked` is a first-class status (recon D1 — the earlier design d
 |---|---|---|---|---|---|---|---|
 | T1 | `UNCLAIMED`/`LAPSED` → `ACTIVE` | `claim` | agent, orchestrator | status claimable (`C-CLAIM-7`), no unfinished blocker (`C-CLAIM-8`), lease free | `+1` | `+1` | 200 + ticket |
 | T2 | `ACTIVE` → `ACTIVE` | `renew_claim` | current holder only | holder + generation match, lease still live (`C-CLAIM-13`) | unchanged | unchanged | 200 + ticket |
-| T3 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `release_claim` | holder; human/orchestrator for anyone | holder + generation match (holder path) — **no liveness check**, so a lapsed holder may release (`C-CLAIM-18`) | `+1` | `+1` | 200 + ticket |
+| T3 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `release_claim` | holder only — **any actor type may hold**, so whoever holds the lease releases its own claim (`C-AUTH-1`); a caller that is not the holder gets `409 not_claim_holder` (`C-CLAIM-18`). A human or orchestrator taking work away from *someone else* does not use `release`: it uses `reassign` (T5) or `revoke` (T6), which need no holder guard (`C-CLAIM-15`, `C-GUARD-8`) | holder + generation match (holder path) — **no liveness check**, so a lapsed holder may release (`C-CLAIM-18`) | `+1` | `+1` | 200 + ticket |
 | T4 | `ACTIVE` → `LAPSED` → `UNCLAIMED` | expiry sweep | system | `lease_expires_at <= now` | `+1` | `+1` | audit only |
 | T5 | any → `ACTIVE` | `reassign` | human, orchestrator | `override` required over a live lease (`C-CLAIM-15`) | `+1` | `+1` | 200 + ticket |
 | T6 | `ACTIVE`/`LAPSED` → `UNCLAIMED` | `revoke` | human, orchestrator | ticket exists | `+1` | `+1` | 200 + ticket |
@@ -513,21 +513,24 @@ it (`C-CLAIM-18`) — and `revoke`, which has no holder guard at all. A diagnosi
 ### 3.2 Which operations require which
 
 The full per-operation matrix is [`docs/concurrency.md`](concurrency.md) — normative for REST and MCP
-alike. The summary:
+alike. **If this document and `concurrency.md` disagree, `concurrency.md` wins and this document is the
+defect to fix** — that includes the §8.2 authorization cells below, not only the summary table
+(`C-OPEN-10`). The summary:
 
 | Operation class | `expected_version` | `generation` (fencing) | Notes |
 |---|---|---|---|
 | `claim`, `claim_next` | optional (if supplied, mismatch → `version_conflict`) | **no** | A claim is a transition, not a write against a known state; requiring the generation would make the first claim impossible (`generation = 0`). |
 | `renew_claim`, `release_claim` | no | **required** | Both are holder-only; the generation is the proof of holding. |
 | Claim-protected ticket mutation by an **agent**: ticket content/status/priority/assignee/resolution/epic, ticket delete, handoff create, memory-write submit (`docs/concurrency.md` §3–§4) | **required** | **required** | `C-FENCE-5`. Task, note and relation writes are **open** even on a claimed ticket (`C-OPEN-1`–`C-OPEN-3`). |
-| Same mutation by a **human** or **orchestrator** | optional | not required | Humans are not fenced (spec §5.5); they still bump `version` and, for ownership-changing overrides, the generation. |
+| Same mutation by an **orchestrator** | **required** | **required** | An orchestrator is an automated writer and is fenced **exactly like an agent** (`C-GUARD-4`, `C-AUTH-8`); `human` is the only unfenced actor type. |
+| Same mutation by a **human** | optional | not required | Humans are not fenced (spec §5.5, `C-FENCE-6`); they still bump `version` and, for ownership-changing overrides, the generation. |
 | `reassign`, `revoke`, `unblock` | no | not required | Override authority; `override: true` is required over a live lease. |
 | Board / epic CRUD, ticket create, bulk create | no | no | Not ticket-owned; idempotency only (§4). |
 | Handoff create / accept | **required** on create by an agent | **required** | A handoff is the strongest ownership claim there is; it must prove holding. |
 
 | ID | Rule |
 |---|---|
-| `C-FENCE-5` | An agent's content mutation without a `generation` is `400 invalid_request` (missing required field), **not** a 409: the caller made a malformed request, not a losing race. A *wrong* generation is `409 lease_generation_mismatch`. |
+| `C-FENCE-5` | An `agent`'s or `orchestrator`'s content mutation without a `generation` is `400 invalid_request` (missing required field), **not** a 409: the caller made a malformed request, not a losing race. A *wrong* generation is `409 lease_generation_mismatch`. |
 | `C-FENCE-6` | A human's content mutation without `expected_version` is allowed and is last-write-wins, but is audited with `previous_version` so the lost update is visible afterwards. `[LEAD-DECIDED]` — the UI has no version in hand for every field edit; forcing one would break the drag-and-drop and inline-edit flows that must keep working (`C-COMPAT-2`). |
 | `C-FENCE-7` | Any accepted mutation that changes client-visible state increments `version` exactly once, regardless of how many fields changed. |
 
@@ -1037,8 +1040,8 @@ type DeliveryError struct {
 | Create / edit / delete boards, epics | yes | no | yes | no |
 | Create tickets (single, bulk) | yes | yes | yes | no |
 | **Claim a ticket** | **no** (`403`) | yes | yes | internal only |
-| Renew / release own claim | n/a | yes | yes | no |
-| Edit ticket content / status / tasks / notes / relations | yes, unfenced | yes, **fenced** (`C-FENCE-2`) | yes, unfenced | no |
+| Renew / release own claim | yes, when it holds one (T8, handoff accept) | yes | yes | no |
+| Edit ticket content / status / tasks / notes / relations | yes, unfenced | yes, **fenced** (`C-FENCE-2`) | yes, **fenced** (`C-FENCE-2`) | no |
 | Create a handoff | yes | yes, fenced | yes | no |
 | Accept a handoff | yes | yes (if addressed or `to_actor` null) | yes | no |
 | **Reassign** a ticket (override a live claim) | yes | **no** (`403`) | yes | no |
@@ -1051,7 +1054,7 @@ type DeliveryError struct {
 | ID | Rule |
 |---|---|
 | `C-AUTH-7` | The `agent` column has **five** "no" cells, and each is a `403 forbidden` — a *capability* failure — never a 409: create/edit/delete boards or epics (structure is the operator's, `C-AUTH-9`); **reassign** (an agent cannot give itself a ticket it did not win); **revoke** (it cannot clear a claim that is not its own); **unblock** (it cannot undo a block a human set, `C-CLAIM-2`); and retry a dead-lettered memory write (dead-letter recovery is an operator decision, `C-OUTBOX-13`). The table's other agent-restricted line, changing `MEMORY_DELIVERY`, is "no" for all four actor types — it is configuration rather than a capability cell, so it is not counted here. Count them from §8.2, not from this sentence. |
-| `C-AUTH-8` | `orchestrator` is a human-equivalent for overrides (it is the human's fleet controller) but is **fenced** on content writes if it also holds the lease; it may hold a lease like an agent. `[LEAD-DECIDED]` — spec §13 lists orchestrator alongside agent for claim-like behaviour and alongside human for override behaviour; this is the smallest reading that satisfies both. |
+| `C-AUTH-8` | `orchestrator` is a human-equivalent for **overrides** (it is the human's fleet controller) and may **hold a lease like an agent**, but on **ticket content, status and delete writes it is fenced exactly like an agent, whether or not it holds the lease**: `expected_version` is always required (`C-GUARD-4`), and where a live lease exists the claim guard applies (`C-GUARD-1`–`C-GUARD-3`), so a non-holder orchestrator gets `409 already_claimed` and a holding one must also present its `generation` (`C-FENCE-2`). `human` is the only unfenced actor type in §8.2 (`C-FENCE-6`). The one deliberate carve-out is handoff create and memory-write submit, where `C-HANDOFF-13` lets an orchestrator act without a lease — those are how a fleet *reports and proposes knowledge*, not how it edits work in flight. `[LEAD-DECIDED]` — spec §13 lists orchestrator alongside agent for claim-like behaviour and alongside human for override behaviour; the human side of that is a **capability** distinction (what it may do), never a **fencing** exemption (what it must prove). An orchestrator is an automated writer that edits at fleet scale and always has the ticket it read in hand, so giving it the human's last-write-wins path would reopen the exact lost-update hole `C-GUARD-4` closes. |
 | `C-AUTH-9` | An `agent` may create tickets (that is how a fleet files follow-up work) but may not create boards or epics (structure stays human). `[LEAD-DECIDED]` — the alternative (agents create boards) has no user, and a board is the operator's organisational unit. |
 
 ### 8.3 Human override versus agent action
