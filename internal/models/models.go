@@ -157,6 +157,14 @@ const (
 	EventClaimReleased   TicketEventType = "claim_released"
 	EventClaimReassigned TicketEventType = "claim_reassigned"
 	EventClaimRevoked    TicketEventType = "claim_revoked"
+
+	// Handoff and outbox events (docs/contracts.md §1.8). Handoff creation writes
+	// handoff_created plus outbox_enqueued in the same transaction as the rows
+	// themselves (C-HANDOFF-14, C-AUDIT-4).
+	EventHandoffCreated    TicketEventType = "handoff_created"
+	EventHandoffAccepted   TicketEventType = "handoff_accepted"
+	EventHandoffSuperseded TicketEventType = "handoff_superseded"
+	EventOutboxEnqueued    TicketEventType = "outbox_enqueued"
 )
 
 type TicketEvent struct {

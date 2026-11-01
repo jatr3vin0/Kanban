@@ -84,6 +84,20 @@ func main() {
 		store.WithClaimableStatuses(cfg.ClaimableStatuses),
 		store.WithReadPool(readPool),
 	)
+	// C-IDEM-16(a): purge expired idempotency keys once, at startup. Housekeeping
+	// only — no correctness depends on it (C-IDEM-19) — so a failure is logged and
+	// the server still starts. The opportunistic in-transaction purge rides along
+	// with non-deduplicated write transactions (C-IDEM-16(b)).
+	if n, err := store.PurgeIdempotencyKeysOnStartup(context.Background()); err != nil {
+		slog.Error("idempotency key purge failed", "error", err)
+	} else if n > 0 {
+		slog.Info("purged expired idempotency keys", "count", n)
+	}
+
+	// Memory delivery stays off in this slice (C-OUTBOX-14's default, spec §10):
+	// handoff transactions create and expose outbox rows, and the delivery worker
+	// arrives with the outbox slice (C-OUTBOX-15).
+
 	mcpSrv := internalmcp.NewServer(store)
 	hub := api.NewHub()
 

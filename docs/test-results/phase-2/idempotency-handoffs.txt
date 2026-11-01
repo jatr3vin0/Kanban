@@ -1,0 +1,94 @@
+# Phase 2 slice 2 — idempotency + handoffs (store level)
+
+Captured: 2026-11-01T21:24:09Z on Linux x86_64, go version go1.25.5 linux/amd64
+
+## gofmt / build / vet
+```
+$ gofmt -l .
+$ go build ./...
+exit 0 (no output)
+$ go vet ./...
+exit 0 (no output)
+```
+
+## full suite
+```
+$ go test ./... -count=1
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.053s
+?   	github.com/rgracey/kanban-mcp/internal/apperr	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/config	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.012s
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.221s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.075s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.929s
+exit=0
+```
+
+## slice 2 tests (verbose, counts)
+```
+$ go test ./internal/store/ -count=1 -v -run "TestIdempotency|TestHandoff"
+--- PASS: TestHandoffCreateAuthorityMatrix (0.07s)
+=== RUN   TestHandoffValidationMatrix
+=== RUN   TestHandoffValidationMatrix/schema_version_2
+=== RUN   TestHandoffValidationMatrix/empty_summary
+=== RUN   TestHandoffValidationMatrix/summary_too_long
+=== RUN   TestHandoffValidationMatrix/bad_memory_type
+=== RUN   TestHandoffValidationMatrix/confidence_below_range
+=== RUN   TestHandoffValidationMatrix/confidence_above_range
+=== RUN   TestHandoffValidationMatrix/confidence_as_string
+=== RUN   TestHandoffValidationMatrix/too_many_tags
+=== RUN   TestHandoffValidationMatrix/tag_too_long
+=== RUN   TestHandoffValidationMatrix/tag_bad_charset
+=== RUN   TestHandoffValidationMatrix/memory_content_too_long
+=== RUN   TestHandoffValidationMatrix/to_actor_too_long
+=== RUN   TestHandoffValidationMatrix/artifact_credentials
+=== RUN   TestHandoffValidationMatrix/artifact_bad_kind
+=== RUN   TestHandoffValidationMatrix/too_many_done_items
+=== RUN   TestHandoffValidationMatrix/document_too_large
+=== RUN   TestHandoffValidationMatrix/unknown_field_warns_by_default_and_fails_in_strict_mode
+--- PASS: TestHandoffValidationMatrix (0.11s)
+=== RUN   TestHandoffIdempotentCreateReplay
+--- PASS: TestHandoffIdempotentCreateReplay (0.01s)
+=== RUN   TestHandoffSupersession
+--- PASS: TestHandoffSupersession (0.01s)
+=== RUN   TestHandoffAcceptTransfersOwnership
+--- PASS: TestHandoffAcceptTransfersOwnership (0.01s)
+=== RUN   TestHandoffAcceptWrongActor
+--- PASS: TestHandoffAcceptWrongActor (0.01s)
+=== RUN   TestHandoffImmutability
+--- PASS: TestHandoffImmutability (0.01s)
+=== RUN   TestHandoffAcceptIdempotentReplay
+--- PASS: TestHandoffAcceptIdempotentReplay (0.01s)
+=== RUN   TestHandoffCreateWritesNothingOnInvalidMemoryWrite
+--- PASS: TestHandoffCreateWritesNothingOnInvalidMemoryWrite (0.01s)
+=== RUN   TestIdempotencyReplayIsByteIdentical
+--- PASS: TestIdempotencyReplayIsByteIdentical (0.01s)
+=== RUN   TestIdempotencyConflictOnDifferentHash
+--- PASS: TestIdempotencyConflictOnDifferentHash (0.01s)
+=== RUN   TestIdempotencyOnly2xxRecorded
+--- PASS: TestIdempotencyOnly2xxRecorded (0.01s)
+=== RUN   TestIdempotencyRequiredVersusOptionalKey
+--- PASS: TestIdempotencyRequiredVersusOptionalKey (0.01s)
+=== RUN   TestIdempotencyKeyValidation
+--- PASS: TestIdempotencyKeyValidation (0.01s)
+=== RUN   TestIdempotencyScopeIsolation
+--- PASS: TestIdempotencyScopeIsolation (0.01s)
+=== RUN   TestIdempotencyExpiredKeyBehavesAsAbsent
+--- PASS: TestIdempotencyExpiredKeyBehavesAsAbsent (0.01s)
+=== RUN   TestIdempotencyPurge
+--- PASS: TestIdempotencyPurge (0.01s)
+=== RUN   TestIdempotencyPurgeRateLimit
+--- PASS: TestIdempotencyPurgeRateLimit (0.01s)
+=== RUN   TestIdempotencyPurgeNeverInsideDedupRequest
+--- PASS: TestIdempotencyPurgeNeverInsideDedupRequest (0.01s)
+=== RUN   TestIdempotencyCrashChild
+=== RUN   TestIdempotencyCrashAtomicity
+=== RUN   TestIdempotencyCrashAtomicity/pre_commit_leaves_neither
+=== RUN   TestIdempotencyCrashAtomicity/post_commit_leaves_both
+--- PASS: TestIdempotencyCrashAtomicity (0.12s)
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.437s
+```

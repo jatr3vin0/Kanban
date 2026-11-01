@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"sync/atomic"
 	"time"
 
 	"github.com/rgracey/kanban-mcp/internal/clocksource"
@@ -28,6 +29,11 @@ type SQLiteStore struct {
 	ttlMS int64
 	// claimableStatuses is LEDGERBOARD_CLAIMABLE_STATUSES (C-CLAIM-3).
 	claimableStatuses []models.Status
+	// lastPurgeMS is the in-process rate limit of the opportunistic idempotency
+	// purge (C-IDEM-16): one value per process, no table and no column, so two
+	// processes on one database may both purge — which is safe because no
+	// correctness depends on the purge running at all (C-IDEM-19).
+	lastPurgeMS atomic.Int64
 }
 
 // Option configures a SQLiteStore.
