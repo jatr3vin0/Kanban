@@ -138,3 +138,166 @@ they are the subprocess legs of `TestCrashAtomicity` and `TestIdempotencyCrashAt
 both of which pass. `internal/store` went from 26 to 48 test functions with slice 2:
 10 in `handoff_test.go` and 12 in `idempotency_test.go`, of which one
 (`TestIdempotencyCrashChild`) is the re-exec helper above, so 47 pass and 1 skips.
+
+## Design-review fix follow-up — R1, R2, R3
+
+Review: architect design review of PR #5 (`docs/design/phase-2-slice-2-review.md`, posted as
+`issuecomment-6564281354`), verdict **FIX-FIRST** with the store code approved as written.
+The three required items are all evidence defects. **No service logic changed**: `handoff.go`,
+`idempotency.go` and `sqlite.go` are untouched by this commit, and the only product-file change is
+the *position* of one crashpoint call in `claim.go` (R3), which changes no behaviour.
+
+Captured: 2026-11-01T21:47:56Z on Linux x86_64, go version go1.25.5 linux/amd64,
+branch `phase-2/idempotency-handoffs`, parent commit `39147aa`.
+
+### R1 — `C-HANDOFF-6` NaN/Infinity and `C-HANDOFF-7` tag dedupe (`internal/store/handoff_test.go`)
+
+`TestHandoffValidationMatrix` gained three sub-cases, all inside the existing test:
+
+| sub-case | rule | assertion |
+|---|---|---|
+| `confidence is 1e400 (overflows float64)` | `C-HANDOFF-6` | `400 handoff_invalid`, `details.field = memory_writes[0].confidence`, 0 handoff rows, 0 outbox rows |
+| `confidence is -1e400 (overflows float64)` | `C-HANDOFF-6` | same |
+| `tags dedupe keeps first-seen order` | `C-HANDOFF-7` | stored document `memory_writes[0].tags == ["a","b"]` and outbox `tags_json == ["a","b"]` for an input of `["a","b","a"]` |
+
+JSON cannot spell `NaN` or `Infinity`, so the two arms the rule names are reachable only the way a
+wire reaches them: `1e400` / `-1e400` are syntactically valid JSON numbers that overflow `float64`.
+`json.Marshal` refuses `math.Inf`, so the body is built as a raw string (a Go map cannot express what
+a client can send). `checkJSONNumber` catches the overflow via `strconv.ParseFloat`'s range error
+before the typed decode, which is why the rejection names the field rather than reporting a generic
+"cannot unmarshal" document error. `validateMemoryWrite`'s `math.IsNaN`/`math.IsInf` guard remains
+unreachable through any transport (review observation 6) — it is the guard that makes the rule true
+for a Go caller, and these two sub-cases are what prove the transport-visible behaviour.
+
+### R2 — 20 kill iterations per leg (`internal/store/idempotency_test.go`)
+
+`const iterations = 5` → `const iterations = 20`, matching `T-IDEM-05` and `T-CRASH-a`, which both
+ratify 20 and call the iteration count the determinism argument. One constant; the doc comment now
+names the ratified count instead of silently deviating from it. Timing for the full 40 child spawns:
+
+```
+--- PASS: TestIdempotencyCrashAtomicity (0.52s)
+    --- PASS: TestIdempotencyCrashAtomicity/pre_commit_leaves_neither (0.26s)
+    --- PASS: TestIdempotencyCrashAtomicity/post_commit_leaves_both (0.26s)
+```
+
+### R3 — `claim.pre_commit` now fires *after* `insertAudit` (`internal/store/claim.go`, both call sites)
+
+`claimInTx` and `claimNextInTx` previously fired `crashpoint.ClaimPreCommit` before the `claimed`
+audit row was written, so `TestIdempotencyCrashAtomicity`'s "no audit row survived" assertion could
+not fail no matter what the audit path did. The call now sits after `insertAudit` in both functions —
+still inside the transaction, still before `COMMIT`, so the point keeps its name and its meaning —
+which is also where `handoff.pre_commit` already sat.
+
+**Verification that the assertion is now real (negative control, scratch copy, never committed).**
+The point is now after the write, so a passing "0 audit rows" no longer distinguishes "the rollback
+removed it" from "it was never written". A counterfactual run proves which it is: copy the tree to
+`/tmp/negctl`, replace the SIGKILL in `crashpoint.fire` with a `return` so the transaction *commits*
+at exactly the same call site, and run the pre-commit leg.
+
+```
+$ cd /tmp/negctl && go test ./internal/store/ -count=1 -run 'TestIdempotencyCrashAtomicity/pre_commit' -v
+        Error Trace:    /tmp/negctl/internal/store/idempotency_test.go:425
+        Error:          Not equal:
+                        expected: int(0)
+                        actual  : int64(1)
+        Messages:       iteration 0: no key row (C-IDEM-13a)
+        Error Trace:    /tmp/negctl/internal/store/idempotency_test.go:426
+        Error:          Should be false
+        Messages:       iteration 0: no mutation
+        Error Trace:    /tmp/negctl/internal/store/idempotency_test.go:427
+        Error:          Not equal:
+                        expected: int(0)
+                        actual  : int64(1)
+        Error Trace:    /tmp/negctl/internal/store/idempotency_test.go:428
+        Error:          Not equal:
+                        expected: int(0)
+                        actual  : int64(1)
+        Messages:       iteration 0: no audit row
+```
+
+So at the instant `claim.pre_commit` fires, the key row, the mutation **and** the audit row are all
+staged in the open transaction. Under the real SIGKILL all four assertions report 0 (below), which
+means the rollback — not the absence of a write — is what leaves nothing behind. That is the
+`C-AUDIT-4` claim, and it is now falsifiable: the same assertions fail the moment the transaction is
+allowed to commit. The scratch copy was deleted; nothing from it is in this commit.
+
+### Re-run: the two named tests, verbose
+
+```
+$ go test ./internal/store/ -count=1 -run 'TestHandoffValidationMatrix|TestIdempotencyCrashAtomicity' -v
+--- PASS: TestHandoffValidationMatrix (0.15s)
+    --- PASS: TestHandoffValidationMatrix/schema_version_2 (0.01s)
+    --- PASS: TestHandoffValidationMatrix/empty_summary (0.01s)
+    --- PASS: TestHandoffValidationMatrix/summary_too_long (0.01s)
+    --- PASS: TestHandoffValidationMatrix/bad_memory_type (0.01s)
+    --- PASS: TestHandoffValidationMatrix/confidence_below_range (0.01s)
+    --- PASS: TestHandoffValidationMatrix/confidence_above_range (0.01s)
+    --- PASS: TestHandoffValidationMatrix/confidence_as_string (0.01s)
+    --- PASS: TestHandoffValidationMatrix/too_many_tags (0.01s)
+    --- PASS: TestHandoffValidationMatrix/tag_too_long (0.01s)
+    --- PASS: TestHandoffValidationMatrix/tag_bad_charset (0.01s)
+    --- PASS: TestHandoffValidationMatrix/memory_content_too_long (0.01s)
+    --- PASS: TestHandoffValidationMatrix/to_actor_too_long (0.01s)
+    --- PASS: TestHandoffValidationMatrix/artifact_credentials (0.01s)
+    --- PASS: TestHandoffValidationMatrix/artifact_bad_kind (0.01s)
+    --- PASS: TestHandoffValidationMatrix/too_many_done_items (0.01s)
+    --- PASS: TestHandoffValidationMatrix/document_too_large (0.01s)
+    --- PASS: TestHandoffValidationMatrix/confidence_is_1e400_(overflows_float64) (0.01s)      <- new, R1
+    --- PASS: TestHandoffValidationMatrix/confidence_is_-1e400_(overflows_float64) (0.01s)     <- new, R1
+    --- PASS: TestHandoffValidationMatrix/tags_dedupe_keeps_first-seen_order (0.01s)           <- new, R1
+    --- PASS: TestHandoffValidationMatrix/unknown_field_warns_by_default_and_fails_in_strict_mode (0.01s)
+--- PASS: TestIdempotencyCrashAtomicity (0.52s)
+    --- PASS: TestIdempotencyCrashAtomicity/pre_commit_leaves_neither (0.26s)                  <- 20 iterations, R2+R3
+    --- PASS: TestIdempotencyCrashAtomicity/post_commit_leaves_both (0.26s)                    <- 20 iterations, R2
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.668s
+```
+
+### Re-run: gofmt / build / vet / full suite
+
+```
+$ gofmt -l .
+$ go build ./...
+exit 0 (no output)
+$ go vet ./...
+exit 0 (no output)
+
+$ go test ./... -count=1
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.076s
+?   	github.com/rgracey/kanban-mcp/internal/apperr	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.004s
+ok  	github.com/rgracey/kanban-mcp/internal/config	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.017s
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.206s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.072s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/store	1.283s
+exit=0
+```
+
+### counts from that run (`go test ./... -count=1 -json`)
+
+| package | top-level pass | subtest pass | fail | skip |
+|---|---|---|---|---|
+| internal/api | 4 | 43 | 0 | 0 |
+| internal/clocksource | 5 | 0 | 0 | 0 |
+| internal/config | 8 | 0 | 0 | 0 |
+| internal/crashpoint | 6 | 0 | 0 | 1 |
+| internal/db | 12 | 2 | 0 | 0 |
+| internal/mcp | 10 | 0 | 0 | 0 |
+| internal/store | 47 | 51 | 0 | 1 |
+| **total** | **92** | **96** | **0** | **2** |
+
+Subtest passes went 93 → 96: the three new R1 sub-cases, no test removed and no assertion relaxed.
+Top-level counts are unchanged. The two skips remain the re-exec helpers (`TestCrashHelperProcess`,
+`TestIdempotencyCrashChild`), which no-op unless the harness sets their child env var; both parents
+pass, and `TestIdempotencyCrashAtomicity` now drives 20 children per leg.
+
+### What this commit does not touch
+
+Contract amendments A5 (`C-IDEM-10` entity id in the hash), A6 (`C-HANDOFF-16` resets
+`lease_renewals`) and the lead's A7 ruling (refuse accept when the handoff generation is stale **and**
+the current lease is live) all land with the handler slice, per the review's Part 3 and the lead's
+decision of 2026-11-01. `docs/contracts.md` and `docs/test-plan.md` are unchanged here.

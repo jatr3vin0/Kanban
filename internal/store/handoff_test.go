@@ -448,6 +448,59 @@ func TestHandoffValidationMatrix(t *testing.T) {
 		})
 	}
 
+	// R1 (C-HANDOFF-6): the NaN/Infinity arms of §5.3. JSON has no NaN or
+	// Infinity literal, but the wire can still carry one: 1e400 and -1e400 overflow
+	// float64, so they arrive as *numbers* and must be refused as handoff_invalid
+	// naming the field — not as a generic "cannot unmarshal" document error.
+	// checkJSONNumber catches them via strconv.ParseFloat's range error before the
+	// typed decode, which is why the body is built as a raw string: json.Marshal
+	// refuses math.Inf, so a Go map cannot express what a wire can.
+	for _, lit := range []string{"1e400", "-1e400"} {
+		t.Run("confidence is "+lit+" (overflows float64)", func(t *testing.T) {
+			s, _, _ := setupClaimStore(t)
+			_, ticketID := newBoardAndTicket(t, s, models.StatusTodo, models.PriorityMedium)
+			a := agent("builder-1")
+			claimed := claimTicket(t, s, ticketID, a)
+			body := json.RawMessage(fmt.Sprintf(
+				`{"schema_version":1,"generation":%d,"expected_version":%d,"summary":"overflowing confidence",`+
+					`"memory_writes":[{"type":"fact","content":"x","confidence":%s}]}`,
+				claimed.Claim.Generation, claimed.Version, lit))
+
+			_, err := s.CreateHandoff(t.Context(), newHandoffRequest(ticketID, a, "k1", body))
+			e := requireCode(t, err, apperr.CodeHandoffInvalid)
+			assert.Equal(t, "memory_writes[0].confidence", e.Details["field"],
+				"C-HANDOFF-6: the rejection names the field, not the document")
+			assert.EqualValues(t, 0, countRows(t, s, `SELECT COUNT(*) FROM handoffs`), "nothing written")
+			assert.EqualValues(t, 0, countRows(t, s, `SELECT COUNT(*) FROM outbox`), "no obligations written")
+		})
+	}
+
+	// R1 (C-HANDOFF-7): duplicates collapse first-seen — in the stored document and
+	// in the outbox row's tags_json, which is the value that reaches the operator's
+	// memory. Neither side may carry "a" twice.
+	t.Run("tags dedupe keeps first-seen order", func(t *testing.T) {
+		s, _, _ := setupClaimStore(t)
+		_, ticketID := newBoardAndTicket(t, s, models.StatusTodo, models.PriorityMedium)
+		a := agent("builder-1")
+		claimed := claimTicket(t, s, ticketID, a)
+		body := agentHandoff(t, claimed.Claim.Generation, claimed.Version, map[string]any{
+			"memory_writes": []map[string]any{
+				{"type": "fact", "content": "x", "tags": []string{"a", "b", "a"}},
+			},
+		})
+
+		res, err := s.CreateHandoff(t.Context(), newHandoffRequest(ticketID, a, "k1", body))
+		require.NoError(t, err)
+		require.Len(t, res.Document.MemoryWrites, 1)
+		assert.Equal(t, []string{"a", "b"}, res.Document.MemoryWrites[0].Tags,
+			"C-HANDOFF-7: duplicates collapse, first-seen order preserved")
+
+		rows := outboxRowsFor(t, s, res.Document.ID)
+		require.Len(t, rows, 1)
+		assert.JSONEq(t, `["a","b"]`, rows[0].TagsJSON,
+			"C-HANDOFF-7: the outbox row carries the deduped list")
+	})
+
 	t.Run("unknown field warns by default and fails in strict mode", func(t *testing.T) {
 		s, _, _ := setupClaimStore(t)
 		_, ticketID := newBoardAndTicket(t, s, models.StatusTodo, models.PriorityMedium)

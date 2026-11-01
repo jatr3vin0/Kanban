@@ -411,10 +411,10 @@ func inspectAfterCrash(t *testing.T, path, ticketID string) (keyRows int64, keyS
 
 // TestIdempotencyCrashAtomicity is T-IDEM-05: the key row and the mutation commit
 // together, so a kill before COMMIT leaves neither and a kill after leaves both —
-// never a third state. Five kills per leg; the iteration count is the determinism
-// argument.
+// never a third state. Twenty kills per leg, the count T-IDEM-05 and T-CRASH-a
+// ratify: the iteration count is the determinism argument.
 func TestIdempotencyCrashAtomicity(t *testing.T) {
-	const iterations = 5
+	const iterations = 20
 
 	t.Run("pre_commit leaves neither", func(t *testing.T) {
 		for i := 0; i < iterations; i++ {

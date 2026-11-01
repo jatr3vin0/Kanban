@@ -190,10 +190,6 @@ func (s *SQLiteStore) claimInTx(ctx context.Context, tx *sql.Tx, req ClaimReques
 		return ClaimedTicket{}, apperr.New(apperr.CodeInternal, "claim updated more than one ticket")
 	}
 
-	// Armed, this kills the process before COMMIT: neither the claim nor its
-	// audit row may survive (C-CONV-3, C-AUDIT-4).
-	crashpoint.Hit(crashpoint.ClaimPreCommit)
-
 	ticket, _, err := readClaimedTicket(ctx, tx, req.TicketID, nowMS)
 	if err != nil {
 		return ClaimedTicket{}, err
@@ -209,6 +205,12 @@ func (s *SQLiteStore) claimInTx(ctx context.Context, tx *sql.Tx, req ClaimReques
 	}, nowMS); err != nil {
 		return ClaimedTicket{}, err
 	}
+	// Armed, this kills the process before COMMIT: the claim, its audit row and
+	// everything else staged here must not survive (C-CONV-3, C-AUDIT-4). It is
+	// fired after insertAudit so the crash test's "no audit row survived"
+	// assertion can actually fail; the point keeps its name and its meaning
+	// (T-IDEM-05, C-IDEM-12).
+	crashpoint.Hit(crashpoint.ClaimPreCommit)
 	return ticket, nil
 }
 
@@ -321,7 +323,6 @@ func (s *SQLiteStore) claimNextInTx(ctx context.Context, tx *sql.Tx, req ClaimNe
 		return ClaimedTicket{}, apperr.New(apperr.CodeInternal,
 			"claim_next pre-read disagreed with the claim statement")
 	}
-	crashpoint.Hit(crashpoint.ClaimPreCommit)
 
 	ticket, _, err := readClaimedTicket(ctx, tx, id, nowMS)
 	if err != nil {
@@ -343,6 +344,10 @@ func (s *SQLiteStore) claimNextInTx(ctx context.Context, tx *sql.Tx, req ClaimNe
 	}, nowMS); err != nil {
 		return ClaimedTicket{}, err
 	}
+	// Armed, this kills the process before COMMIT: fired after insertAudit for
+	// the same reason as in claimInTx, so the audit row is staged and the
+	// rollback must take it (T-IDEM-05, C-AUDIT-4).
+	crashpoint.Hit(crashpoint.ClaimPreCommit)
 	return ticket, nil
 }
 
