@@ -1,8 +1,6 @@
 package mptest
 
 import (
-	"testing"
-
 	"github.com/rgracey/kanban-mcp/internal/clocksource"
 )
 
