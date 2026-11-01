@@ -522,8 +522,8 @@ defect to fix** — that includes the §8.2 authorization cells below, not only 
 | `claim`, `claim_next` | optional (if supplied, mismatch → `version_conflict`) | **no** | A claim is a transition, not a write against a known state; requiring the generation would make the first claim impossible (`generation = 0`). |
 | `renew_claim`, `release_claim` | no | **required** | Both are holder-only; the generation is the proof of holding. |
 | Claim-protected ticket mutation by an **agent**: ticket content/status/priority/assignee/resolution/epic, ticket delete, handoff create, memory-write submit (`docs/concurrency.md` §3–§4) | **required** | **required** | `C-FENCE-5`. Task, note and relation writes are **open** even on a claimed ticket (`C-OPEN-1`–`C-OPEN-3`). |
-| Same mutation by an **orchestrator** | **required** | **required** | An orchestrator is an automated writer and is fenced **exactly like an agent** (`C-GUARD-4`, `C-AUTH-8`); `human` is the only unfenced actor type. |
-| Same mutation by a **human** | optional | not required | Humans are not fenced (spec §5.5, `C-FENCE-6`); they still bump `version` and, for ownership-changing overrides, the generation. |
+| Same content / status / delete mutation by an **orchestrator** | **required** | **required** | An orchestrator is an automated writer and is fenced exactly like an agent (`C-GUARD-4`, `C-AUTH-8`); `human` is the only unfenced actor type. The one exception is handoff create and memory-write submit, which `C-HANDOFF-13` lets an orchestrator do without a lease. |
+| Same content / status / delete mutation by a **human** | optional | not required | Humans are not fenced (spec §5.5, `C-FENCE-6`); they still bump `version` and, for ownership-changing overrides, the generation. |
 | `reassign`, `revoke`, `unblock` | no | not required | Override authority; `override: true` is required over a live lease. |
 | Board / epic CRUD, ticket create, bulk create | no | no | Not ticket-owned; idempotency only (§4). |
 | Handoff create / accept | **required** on create by an agent | **required** | A handoff is the strongest ownership claim there is; it must prove holding. |
