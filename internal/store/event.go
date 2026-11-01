@@ -46,9 +46,15 @@ func (s *SQLiteStore) CreateTicketEvent(ctx context.Context, ticketID string, ev
 }
 
 // ListTicketEvents returns all events for a ticket ordered oldest-first.
+//
+// created_at is TEXT RFC3339 *seconds* (C-AUDIT-8), so several rows share one
+// instant routinely — a claim, its renewal and its release can all land inside
+// one second. rowid is therefore part of the order, not a decoration: it is the
+// insertion order, and without it SQLite is free to return ties in any order
+// (C-AUDIT-7).
 func (s *SQLiteStore) ListTicketEvents(ctx context.Context, ticketID string) ([]models.TicketEvent, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, ticket_id, type, actor, payload, created_at FROM ticket_events WHERE ticket_id = ? ORDER BY created_at ASC`,
+		`SELECT id, ticket_id, type, actor, payload, created_at FROM ticket_events WHERE ticket_id = ? ORDER BY created_at ASC, rowid ASC`,
 		ticketID,
 	)
 	if err != nil {

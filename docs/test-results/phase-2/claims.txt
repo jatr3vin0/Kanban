@@ -1,0 +1,71 @@
+=== RUN   TestClaimEightConcurrentClaimantsOneWinner
+--- PASS: TestClaimEightConcurrentClaimantsOneWinner (0.06s)
+=== RUN   TestClaimNextRaceGivesDistinctTickets
+--- PASS: TestClaimNextRaceGivesDistinctTickets (0.04s)
+=== RUN   TestClaimNextPriorityOrder
+--- PASS: TestClaimNextPriorityOrder (0.01s)
+=== RUN   TestClaimSuccessShape
+--- PASS: TestClaimSuccessShape (0.01s)
+=== RUN   TestClaimDiagnosisOrder
+=== RUN   TestClaimDiagnosisOrder/done_is_not_claimable
+=== RUN   TestClaimDiagnosisOrder/blocked_is_not_claimable
+=== RUN   TestClaimDiagnosisOrder/unfinished_blocker
+=== RUN   TestClaimDiagnosisOrder/absent_ticket_is_404_before_any_409
+=== RUN   TestClaimDiagnosisOrder/live_lease_is_already_claimed_with_the_full_detail_set
+--- PASS: TestClaimDiagnosisOrder (0.03s)
+    --- PASS: TestClaimDiagnosisOrder/done_is_not_claimable (0.01s)
+    --- PASS: TestClaimDiagnosisOrder/blocked_is_not_claimable (0.01s)
+    --- PASS: TestClaimDiagnosisOrder/unfinished_blocker (0.01s)
+    --- PASS: TestClaimDiagnosisOrder/absent_ticket_is_404_before_any_409 (0.01s)
+    --- PASS: TestClaimDiagnosisOrder/live_lease_is_already_claimed_with_the_full_detail_set (0.01s)
+=== RUN   TestClaimLapsedLeaseIsClaimable
+=== RUN   TestClaimLapsedLeaseIsClaimable/lapsed_in_progress_lease
+=== RUN   TestClaimLapsedLeaseIsClaimable/in_progress_with_no_holder
+--- PASS: TestClaimLapsedLeaseIsClaimable (0.01s)
+    --- PASS: TestClaimLapsedLeaseIsClaimable/lapsed_in_progress_lease (0.01s)
+    --- PASS: TestClaimLapsedLeaseIsClaimable/in_progress_with_no_holder (0.01s)
+=== RUN   TestClaimHumanForbidden
+--- PASS: TestClaimHumanForbidden (0.01s)
+=== RUN   TestClaimExpectedVersionGuard
+--- PASS: TestClaimExpectedVersionGuard (0.01s)
+=== RUN   TestRenewHeartbeat
+--- PASS: TestRenewHeartbeat (0.01s)
+=== RUN   TestRenewNeverResurrectsLapsedLease
+--- PASS: TestRenewNeverResurrectsLapsedLease (0.01s)
+=== RUN   TestRenewDiagnosisOrder
+=== RUN   TestRenewDiagnosisOrder/another_actor_reusing_the_generation_number_is_not_the_holder
+=== RUN   TestRenewDiagnosisOrder/holder_with_a_stale_generation
+=== RUN   TestRenewDiagnosisOrder/absent_ticket
+=== RUN   TestRenewDiagnosisOrder/defensive_row_is_a_409,_never_a_500
+--- PASS: TestRenewDiagnosisOrder (0.03s)
+    --- PASS: TestRenewDiagnosisOrder/another_actor_reusing_the_generation_number_is_not_the_holder (0.01s)
+    --- PASS: TestRenewDiagnosisOrder/holder_with_a_stale_generation (0.01s)
+    --- PASS: TestRenewDiagnosisOrder/absent_ticket (0.01s)
+    --- PASS: TestRenewDiagnosisOrder/defensive_row_is_a_409,_never_a_500 (0.01s)
+=== RUN   TestReleaseClearsLeaseInOneRow
+--- PASS: TestReleaseClearsLeaseInOneRow (0.01s)
+=== RUN   TestReleaseDiagnosis
+=== RUN   TestReleaseDiagnosis/non-holder
+=== RUN   TestReleaseDiagnosis/stale_generation
+=== RUN   TestReleaseDiagnosis/absent_ticket
+=== RUN   TestReleaseDiagnosis/lapsed_holder_with_its_current_generation_succeeds
+=== RUN   TestReleaseDiagnosis/lapsed_holder_with_a_stale_generation_is_rejected
+--- PASS: TestReleaseDiagnosis (0.03s)
+    --- PASS: TestReleaseDiagnosis/non-holder (0.01s)
+    --- PASS: TestReleaseDiagnosis/stale_generation (0.01s)
+    --- PASS: TestReleaseDiagnosis/absent_ticket (0.01s)
+    --- PASS: TestReleaseDiagnosis/lapsed_holder_with_its_current_generation_succeeds (0.01s)
+    --- PASS: TestReleaseDiagnosis/lapsed_holder_with_a_stale_generation_is_rejected (0.01s)
+=== RUN   TestGenerationIsMonotonic
+--- PASS: TestGenerationIsMonotonic (0.01s)
+=== RUN   TestClaimJSONShape
+--- PASS: TestClaimJSONShape (0.01s)
+=== RUN   TestClaimActorValidation
+--- PASS: TestClaimActorValidation (0.01s)
+=== RUN   TestClaimableStatusConfig
+--- PASS: TestClaimableStatusConfig (0.01s)
+=== RUN   TestClaimSortsLeaseTTL
+--- PASS: TestClaimSortsLeaseTTL (0.01s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.290s
+exit=0

@@ -145,6 +145,10 @@ Consequences the tests rely on:
   exercised deterministically by advancing the fake clock and/or invoking the store method directly
   (`C-CLAIM-19`: the sweep is optional for correctness and idempotent, so invoking it directly is
   testing the contract, not bypassing one).
+- the fake clock file is seeded with the real current time before a test starts and is never set
+  below it. Legacy writers (`ticket.go`, `event.go`) still stamp the TEXT columns with
+  `time.Now()`; new-path writers take the same instant from `now_ms`, so a clock set below real
+  time would interleave a ticket's timeline backwards.
 
 ### 1.4 Crash injection — kill at a named step, never at a random time
 

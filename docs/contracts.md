@@ -23,7 +23,7 @@ Two rules below exist *because* the probe caught the naive version failing (`C-C
 | `C-CONV-1` | **Two clocks, never compared.** Existing columns (`created_at`, `updated_at`, `ticket_events.created_at`, and every other column in `0001_init`) are `TEXT` RFC3339 **second precision** and stay untouched. Every new time column is `INTEGER` unix **milliseconds**. A query, comparison or Go expression that compares a TEXT time with an INTEGER time is a defect. Lease decisions read only INTEGER columns. |
 | `C-CONV-2` | **Server time only.** `now_ms` is computed once per request in Go (`time.Now().UTC().UnixMilli()`), passed into every statement as a bound parameter, and never re-read inside SQL (`strftime('now')`, `datetime('now')`, `CURRENT_TIMESTAMP` are banned). Client-supplied times are never used for expiry, and no clock-skew allowance is applied. |
 | `C-CONV-3` | **One transaction per mutation.** Every mutating operation runs inside `BEGIN IMMEDIATE` on the single writer connection (`_txlock=immediate`, `SetMaxOpenConns(1)`). Guard, mutation, audit rows, outbox rows and the idempotency record commit together or not at all. |
-| `C-CONV-4` | **No read-then-write.** Every mutation is a single conditional `UPDATE` (or `INSERT`) whose `WHERE` encodes every guard, with the outcome decided by `RowsAffected()`. A `SELECT` may follow a 0-row result **for diagnosis only** (`C-CLAIM-12`); it may never decide whether to write. |
+| `C-CONV-4` | **No read-then-write.** Every mutation is a single conditional `UPDATE` (or `INSERT`) whose `WHERE` encodes every guard, with the outcome decided by `RowsAffected()`. A `SELECT` may follow a 0-row result **for diagnosis only** (`C-CLAIM-12`); it may never decide whether to write. A single read of the target row inside the same `BEGIN IMMEDIATE` transaction, before the mutation, is permitted for two purposes only: the pre-transition values that §1.8 requires in an audit payload (`previous_holder`, `previous_generation`, `previous_expires_at`) and the diagnosis after a 0-row result. It may never influence the guard — the mutation's own `WHERE` and `RowsAffected()`/`RETURNING` decide. `C-INV-5`'s grep criterion is refined accordingly: at most one such read per mutation, always inside the write transaction. |
 | `C-CONV-5` | **Enums are validated in Go, never by SQLite.** No `CHECK` constraints in `0002` (recon G17: `CHECK` needs a table rebuild, and existing rows may already violate it). A column typed `TEXT` with an enum meaning is validated at the service boundary; the store layer must reject unknown values itself, not rely on the handler. |
 | `C-CONV-6` | **IDs** are 32 lowercase hex characters, matching the existing convention (recon R5 — not hyphenated UUIDs). New tables (`handoffs`, `outbox`, `idempotency_keys` rows) use the same generator. |
 | `C-CONV-7` | **Every mutating response returns the whole entity** including `version` and the `claim` block (§1.4). A caller never has to re-read to learn its generation. |
@@ -240,6 +240,8 @@ All payloads are JSON objects. `generation` is the **post**-transition generatio
 | `memory_delivery_failed` | an outbox row reaches `failed` (dead-letter) | `{"request_id","write_id","attempts":<int>,"error_code"}` |
 | `unblocked` | human/orchestrator moves a ticket out of `blocked` | `{"request_id","from":"blocked","to":"todo"\|"in_progress"\|"done","previous_generation":<int>,"generation":<int>}` |
 
+**§1.8 `claimed` row.** `previous_holder` is the holder the row had immediately before this transition — the id of a lapsed holder, not `null`, when the claim took over a lapsed lease; `null` only when the row was genuinely unclaimed. `previous_generation` is the pre-transition generation (always `generation - 1`). Applies to `claim` and `claim_next` alike.
+
 Existing types (`created`, `moved`, `edited`, `commented`, `comment_edited`, `task_added`,
 `task_updated`, `task_deleted`, `relation_added`, `relation_removed`) keep their payload shapes
 (recon §5.1) and gain only `request_id`, which old readers ignore (`C-COMPAT-5`).
@@ -434,6 +436,7 @@ lock is still held, so the read is consistent with the statement that just faile
 | | status not claimable (`done`, `blocked`, or not in `LEDGERBOARD_CLAIMABLE_STATUSES`) | `status_not_claimable` | 409 | `ticket_id`, `status`, `claimable_statuses` |
 | | unfinished blocker | `dependency_blocked` | 409 | `ticket_id`, `blocking_ticket_ids[]`, `blocking_statuses[]` |
 | | live lease held by someone else | `already_claimed` | 409 | `ticket_id`, `status`, `version`, `holder`, `holder_type`, `lease_expires_at`, `lease_generation` |
+| | supplied `expected_version` ≠ current (`C-GUARD-6`) | `version_conflict` | 409 | `ticket_id`, `expected_version`, `current_version` |
 | `claim_next` | no claimable ticket on board | `not_found` | 404 | `board_id`, `reason:"no_claimable_ticket"` |
 | `renew` | ticket absent | `not_found` | 404 | `ticket_id` |
 | | not the holder | `not_claim_holder` | 409 | `ticket_id`, `holder`, `holder_type` |
@@ -461,6 +464,8 @@ row update, so no sequence of contract operations can reach this row's precondit
 `500` (`C-CLAIM-23`) is a worse answer than a truthful 409 if an invariant is ever broken, and because
 the store must not crash on a row a direct `UPDATE` produced. QA covers it with a direct-SQL fixture,
 never through a transport (`C-CLAIM-25`).
+
+`claim`'s last row exists only because `expected_version` is optional (`C-GUARD-6`), and it sits after `already_claimed` so that `C-CLAIM-5` answers first. `claim_next` takes no `expected_version` and needs no diagnosis block: one statement; no rows is `404 no_claimable_ticket`.
 
 Two operations deliberately have **no** `lease_expired` row, and the absence is normative: `release` —
 a lapsed holder with the current generation **succeeds**, because the release statement has no clock in

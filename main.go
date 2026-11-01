@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/rgracey/kanban-mcp/internal/api"
+	"github.com/rgracey/kanban-mcp/internal/clocksource"
 	"github.com/rgracey/kanban-mcp/internal/config"
+	"github.com/rgracey/kanban-mcp/internal/crashpoint"
 	"github.com/rgracey/kanban-mcp/internal/db"
 	internalmcp "github.com/rgracey/kanban-mcp/internal/mcp"
 	"github.com/rgracey/kanban-mcp/internal/store"
@@ -44,6 +46,20 @@ func main() {
 	slog.Debug("config loaded", "config", cfg)
 
 	// Open database with migrations
+	// Arm the inert crash-injection seam only if the environment says so (C-CONV-11).
+	// This is the only call site: nothing on the REST or MCP surface can arm a point.
+	crashpoint.Init()
+	if names := crashpoint.ArmedNames(); len(names) > 0 {
+		slog.Warn("crash points armed: this process will SIGKILL itself at the named points", "points", names)
+	}
+
+	// now_ms comes from exactly one place (C-CONV-2).
+	clock, err := clocksource.FromEnv()
+	if err != nil {
+		slog.Error("invalid clock configuration", "error", err)
+		log.Fatal(err)
+	}
+
 	dbConn, err := db.Open(cfg.DBPath)
 	if err != nil {
 		slog.Error("failed to open database", "error", err)
@@ -53,7 +69,21 @@ func main() {
 	slog.Info("database opened", "path", cfg.DBPath)
 
 	// Create store, MCP server, and API router
-	store := store.NewSQLiteStore(dbConn)
+	// The contract's separate read pool (C-CONV-9): four connections, never used for
+	// a mutation. The single writer handle above serialises every write.
+	readPool, err := db.OpenReadPool(cfg.DBPath)
+	if err != nil {
+		slog.Error("failed to open read pool", "error", err)
+		log.Fatal(err)
+	}
+	defer readPool.Close()
+
+	store := store.NewSQLiteStore(dbConn,
+		store.WithClock(clock),
+		store.WithLeaseTTLMS(cfg.LeaseTTLMS),
+		store.WithClaimableStatuses(cfg.ClaimableStatuses),
+		store.WithReadPool(readPool),
+	)
 	mcpSrv := internalmcp.NewServer(store)
 	hub := api.NewHub()
 

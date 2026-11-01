@@ -1,0 +1,23 @@
+=== RUN   TestDSNCarriesEveryContractedPragma
+--- PASS: TestDSNCarriesEveryContractedPragma (0.00s)
+=== RUN   TestForeignKeysOnEveryPooledConnection
+=== RUN   TestForeignKeysOnEveryPooledConnection/contracted_DSN:_every_connection_has_the_pragmas
+=== RUN   TestForeignKeysOnEveryPooledConnection/naive_db.Exec(PRAGMA):_reaches_one_connection_of_eight
+--- PASS: TestForeignKeysOnEveryPooledConnection (0.00s)
+    --- PASS: TestForeignKeysOnEveryPooledConnection/contracted_DSN:_every_connection_has_the_pragmas (0.00s)
+    --- PASS: TestForeignKeysOnEveryPooledConnection/naive_db.Exec(PRAGMA):_reaches_one_connection_of_eight (0.00s)
+=== RUN   TestOpenReturnsSingleWriterPool
+--- PASS: TestOpenReturnsSingleWriterPool (0.06s)
+=== RUN   TestOpenReadPoolHasFourConnections
+--- PASS: TestOpenReadPoolHasFourConnections (0.06s)
+=== RUN   TestDirtyMigrationFailsClosed
+--- PASS: TestDirtyMigrationFailsClosed (0.01s)
+=== RUN   TestMigrate0002InPlace
+--- PASS: TestMigrate0002InPlace (0.01s)
+=== RUN   TestMigrate0002DownRoundTrip
+--- PASS: TestMigrate0002DownRoundTrip (0.02s)
+=== RUN   TestMigrate0002IdempotentOpenLoop
+--- PASS: TestMigrate0002IdempotentOpenLoop (0.01s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.165s
+exit=0

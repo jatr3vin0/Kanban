@@ -149,6 +149,14 @@ const (
 	EventTaskDeleted     TicketEventType = "task_deleted"
 	EventRelationAdded   TicketEventType = "relation_added"
 	EventRelationRemoved TicketEventType = "relation_removed"
+
+	// Ownership events (docs/contracts.md §1.8). The legacy types above keep
+	// their payload shapes and gain only request_id (C-COMPAT-5).
+	EventClaimed         TicketEventType = "claimed"
+	EventClaimRenewed    TicketEventType = "claim_renewed"
+	EventClaimReleased   TicketEventType = "claim_released"
+	EventClaimReassigned TicketEventType = "claim_reassigned"
+	EventClaimRevoked    TicketEventType = "claim_revoked"
 )
 
 type TicketEvent struct {
