@@ -78,6 +78,20 @@ func main() {
 	}
 	defer readPool.Close()
 
+	// Memory delivery defaults to off (C-OUTBOX-14, spec §10): handoff
+	// transactions still create and expose outbox rows, and nothing is delivered
+	// (C-OUTBOX-15). The delivery worker itself is wired through the store
+	// (store.StartOutboxWorker) and is exercised at the store level in Phase 2;
+	// this binary has no adapter to give it, because the only adapter in v1 is the
+	// mock and the real operator-memory integration is blocked externally.
+	//
+	// C-OUTBOX-18: the worker must never start without an adapter. Asking for it
+	// here is a startup error, not a pile of dead letters. It is checked before
+	// the store variable shadows the package name below.
+	if cfg.MemoryDelivery == store.MemoryDeliveryWorker {
+		log.Fatal(store.ErrNoMemoryAdapter)
+	}
+
 	store := store.NewSQLiteStore(dbConn,
 		store.WithClock(clock),
 		store.WithLeaseTTLMS(cfg.LeaseTTLMS),
@@ -94,9 +108,9 @@ func main() {
 		slog.Info("purged expired idempotency keys", "count", n)
 	}
 
-	// Memory delivery stays off in this slice (C-OUTBOX-14's default, spec §10):
-	// handoff transactions create and expose outbox rows, and the delivery worker
-	// arrives with the outbox slice (C-OUTBOX-15).
+	// Memory delivery stays off unless an adapter is wired (see the C-OUTBOX-18
+	// check above): rows accumulate and stay visible, nothing is delivered,
+	// failed or dropped (C-OUTBOX-15).
 
 	mcpSrv := internalmcp.NewServer(store)
 	hub := api.NewHub()

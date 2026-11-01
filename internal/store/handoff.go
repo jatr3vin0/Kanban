@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -131,7 +132,7 @@ type Handoff struct {
 // `from_actor_type`, `status`, `created_at`, `accepted_*`) are ignored when a
 // client sends them (C-FENCE-12, §5.2) — and warned about, not silently dropped.
 type handoffPayload struct {
-	SchemaVersion int                  `json:"schema_version"`
+	SchemaVersion json.Number          `json:"schema_version"`
 	ToActor       *string              `json:"to_actor"`
 	Supersedes    *string              `json:"supersedes"`
 	Summary       string               `json:"summary"`
@@ -303,7 +304,7 @@ func (s *SQLiteStore) createHandoffInTx(ctx context.Context, tx *sql.Tx, req Cre
 	}
 
 	checksum, err := handoffChecksum(handoffChecksumFields{
-		SchemaVersion: payload.SchemaVersion,
+		SchemaVersion: HandoffSchemaVersion,
 		ID:            id,
 		TicketID:      req.TicketID,
 		BoardID:       boardID,
@@ -806,6 +807,16 @@ func decodeHandoffPayload(raw json.RawMessage, strict bool) (*handoffPayload, []
 
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
+		// A bare NaN/Infinity token is not JSON at all, so the document as a whole
+		// fails to parse. Naming `document` there would hide the field that actually
+		// carries the bad number, so the token is located first and the error names
+		// its field path (QA slice-2 observation, rider (a)).
+		if field, ok := nonFiniteNumberField(raw); ok {
+			if strings.HasSuffix(field, ".confidence") {
+				return nil, nil, handoffInvalid(field, "must be a JSON number in [0.0, 1.0]")
+			}
+			return nil, nil, handoffInvalid(field, "must be a JSON number")
+		}
 		return nil, nil, handoffInvalid("document", "the handoff document must be a JSON object")
 	}
 
@@ -858,7 +869,10 @@ func checkJSONTypes(fields map[string]json.RawMessage) error {
 		}
 	}
 	if raw, ok := fields["schema_version"]; ok {
-		if err := checkJSONNumber(raw); err != nil {
+		// The type gate names `schema_version`, not `document`: a float such as 1.5
+		// used to pass the number check and fail later in the typed decode, which
+		// reported the whole document (QA slice-2 observation, rider (b)).
+		if err := checkJSONInteger(raw); err != nil {
 			return handoffInvalid("schema_version", "must be the integer 1")
 		}
 	}
@@ -883,12 +897,137 @@ func checkJSONNumber(raw json.RawMessage) error {
 	return nil
 }
 
+// checkJSONInteger reports whether raw is a JSON number with no fractional part.
+// It is the type gate for schema_version: §5.2 requires the integer 1, so a float
+// or an out-of-range value must be reported against that field rather than
+// surfacing later as an untyped decode error on the whole document.
+func checkJSONInteger(raw json.RawMessage) error {
+	if err := checkJSONNumber(raw); err != nil {
+		return err
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(string(raw)), 64)
+	if err != nil {
+		return err
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return fmt.Errorf("not an integer")
+	}
+	return nil
+}
+
+// schemaVersionInt parses the decoded schema_version. It is carried as a
+// json.Number so that 1.0 - a JSON number equal to the only accepted version -
+// is accepted, and so that anything else is reported against the field instead
+// of failing the typed decode with a message about the whole document.
+func (p *handoffPayload) schemaVersionInt() (int64, error) {
+	if p.SchemaVersion == "" {
+		return 0, fmt.Errorf("schema_version is missing")
+	}
+	if n, err := p.SchemaVersion.Int64(); err == nil {
+		return n, nil
+	}
+	f, err := p.SchemaVersion.Float64()
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return 0, fmt.Errorf("schema_version is not an integer")
+	}
+	return int64(f), nil
+}
+
+// nonFiniteFieldKeyPattern matches the object key immediately before a value,
+// e.g. the `"confidence"` in `{"confidence": NaN`.
+var nonFiniteFieldKeyPattern = regexp.MustCompile(`"([A-Za-z_][A-Za-z0-9_]*)"[ \t\r\n]*:[ \t\r\n]*$`)
+
+// nonFiniteNumberField finds a bare NaN / Infinity / -Infinity token that makes a
+// payload invalid JSON, and names the field carrying it: the §5.2 path
+// `memory_writes[3].confidence`, or `schema_version`, or the bare key.
+//
+// The scan skips string literals, so the word "NaN" inside a summary or a memory
+// write's content is never mistaken for a token.
+func nonFiniteNumberField(raw []byte) (string, bool) {
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '"' {
+			// Skip the whole string literal, honouring escapes.
+			for i++; i < len(raw); i++ {
+				if raw[i] == '\\' {
+					i++
+					continue
+				}
+				if raw[i] == '"' {
+					break
+				}
+			}
+			continue
+		}
+		if !isNonFiniteTokenAt(raw, i) {
+			continue
+		}
+		key := lastKeyBefore(raw[:i])
+		if key == "" {
+			return "", false
+		}
+		if key == "confidence" {
+			// The array index is the number of confidence keys before this one.
+			index := bytes.Count(bytes.ToLower(raw[:i]), []byte(`"confidence"`)) - 1
+			if index < 0 {
+				index = 0
+			}
+			return fmt.Sprintf("memory_writes[%d].confidence", index), true
+		}
+		return key, true
+	}
+	return "", false
+}
+
+// isNonFiniteTokenAt reports whether a bare NaN/Infinity/-Infinity token starts at
+// i, delimited by JSON structure rather than being part of a longer word.
+func isNonFiniteTokenAt(raw []byte, i int) bool {
+	for _, tok := range []string{"-Infinity", "Infinity", "NaN"} {
+		if !bytes.HasPrefix(raw[i:], []byte(tok)) {
+			continue
+		}
+		before := byte(' ')
+		if i > 0 {
+			before = raw[i-1]
+		}
+		after := byte(' ')
+		if i+len(tok) < len(raw) {
+			after = raw[i+len(tok)]
+		}
+		if isJSONDelimiter(before) && isJSONDelimiter(after) {
+			return true
+		}
+	}
+	return false
+}
+
+// isJSONDelimiter reports whether b is whitespace or JSON structure.
+func isJSONDelimiter(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', ',', ':', '[', ']', '{', '}':
+		return true
+	}
+	return false
+}
+
+// lastKeyBefore returns the object key whose value starts at the end of prefix.
+func lastKeyBefore(prefix []byte) string {
+	m := nonFiniteFieldKeyPattern.FindSubmatch(prefix)
+	if m == nil {
+		return ""
+	}
+	return string(m[1])
+}
+
 // validateHandoffPayload is the §5.2 field table, one rule per row. Every failure
 // is `400 handoff_invalid` with `details.field` (C-HANDOFF-1).
 func validateHandoffPayload(p *handoffPayload) error {
-	if p.SchemaVersion != HandoffSchemaVersion {
+	version, verr := p.schemaVersionInt()
+	if verr != nil || version != HandoffSchemaVersion {
 		return handoffInvalid("schema_version",
-			fmt.Sprintf("must be exactly %d, got %d", HandoffSchemaVersion, p.SchemaVersion))
+			fmt.Sprintf("must be exactly %d, got %s", HandoffSchemaVersion, p.SchemaVersion.String()))
 	}
 
 	if p.ToActor != nil {

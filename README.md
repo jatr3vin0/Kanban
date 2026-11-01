@@ -216,6 +216,12 @@ Flags take precedence over environment variables.
 
 The database file is created automatically on first run. Migrations are applied automatically on startup.
 
+#### Memory delivery (`MEMORY_DELIVERY`)
+
+`MEMORY_DELIVERY` defaults to `off`: handoffs still enqueue their memory writes, the rows are visible in `GET /api/v1/outbox`, and nothing is delivered.
+
+`MEMORY_DELIVERY=worker` is **refused in v1** — the server refuses to start, because there is no real operator-memory adapter to deliver to yet, and a worker that failed every row would turn a configuration mistake into a pile of dead letters. The mock adapter in `internal/memory` is test-only: it writes to a local JSONL file that dies with the process, so marking rows `succeeded` against it would claim the operator's memory holds a write it does not. Delivery becomes available when the operator-memory integration lands; until then the outbox is a visible, honest backlog.
+
 ---
 
 ## Features

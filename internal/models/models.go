@@ -165,6 +165,19 @@ const (
 	EventHandoffAccepted   TicketEventType = "handoff_accepted"
 	EventHandoffSuperseded TicketEventType = "handoff_superseded"
 	EventOutboxEnqueued    TicketEventType = "outbox_enqueued"
+
+	// Delivery events (docs/contracts.md §1.8). Only terminal transitions are
+	// audited — retries inside retryable/uncertain are the attempt counter's
+	// record, so a flapping adapter cannot flood the timeline (C-OUTBOX-24).
+	EventMemoryDelivered      TicketEventType = "memory_delivered"
+	EventMemoryDeliveryFailed TicketEventType = "memory_delivery_failed"
+
+	// EventOutboxRetried records an operator's dead-letter retry (C-OUTBOX-13).
+	// §1.8's table lists no type for this transition; the gap is reported to the
+	// architect rather than hidden, because the alternatives are worse: no audit
+	// row breaks C-OUTBOX-13's "audits it", and reusing memory_delivery_failed
+	// would assert a failure that no longer holds.
+	EventOutboxRetried TicketEventType = "outbox_retried"
 )
 
 type TicketEvent struct {

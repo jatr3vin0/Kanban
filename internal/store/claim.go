@@ -843,15 +843,50 @@ func claimState(c models.Claim, nowMS int64) models.ClaimState {
 // inside the payload are unix milliseconds because they are data.
 func insertAudit(ctx context.Context, tx *sql.Tx, ticketID string, typ models.TicketEventType,
 	actor models.Actor, payload map[string]any, nowMS int64) error {
-	body, err := json.Marshal(payload)
+	args, err := auditRowArgs(ticketID, typ, actor, payload, nowMS)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
         INSERT INTO ticket_events (id, ticket_id, type, actor, payload, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)`,
-		newUUID(), ticketID, string(typ), actor.String(), string(body), timeText(nowMS))
+        VALUES (?, ?, ?, ?, ?, ?)`, args...)
 	return err
+}
+
+// insertAuditIfTicketExists writes a ticket-scoped audit row only when the ticket
+// still exists. ticket_events has a NOT NULL FK to tickets (0001_init.up.sql:34)
+// and cascades, while C-SCHEMA-13 deliberately keeps outbox rows alive after
+// their ticket is deleted — so a delivery transition for a deleted ticket has
+// nowhere to write its audit. C-AUDIT-9 already documents that a ticket-scoped
+// audit cannot outlive its ticket; this is that gap made explicit, instead of
+// failing the transition and losing the delivery fact with it.
+//
+// One statement, no read-then-write (C-CONV-4): the EXISTS clause is the guard,
+// so a deleted ticket yields no row and no error rather than a failed transition.
+func insertAuditIfTicketExists(ctx context.Context, tx *sql.Tx, ticketID string,
+	typ models.TicketEventType, actor models.Actor, payload map[string]any, nowMS int64) error {
+	args, err := auditRowArgs(ticketID, typ, actor, payload, nowMS)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+        INSERT INTO ticket_events (id, ticket_id, type, actor, payload, created_at)
+        SELECT ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM tickets WHERE id = ?)`,
+		append(args, ticketID)...)
+	return err
+}
+
+// auditRowArgs renders the six column values of one audit row, so insertAudit and
+// insertAuditIfTicketExists cannot drift apart in their payload marshalling or
+// their created_at formatting.
+func auditRowArgs(ticketID string, typ models.TicketEventType, actor models.Actor,
+	payload map[string]any, nowMS int64) ([]any, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return []any{newUUID(), ticketID, string(typ), actor.String(), string(body), timeText(nowMS)}, nil
 }
 
 // queryRower is the subset of *sql.Tx and *sql.DB the read helper needs, so the
