@@ -229,12 +229,24 @@ func startChild(t *testing.T, bin string, env ...string) *Child {
 }
 
 // Line reads one JSON result line (blocking, with timeout). The line is both
-// the op result and part of the process transcript.
+// the op result and part of the process transcript. Call from the test
+// goroutine only — on failure it t.Fatalfs, which is illegal elsewhere; use
+// LineErr from helper goroutines (collect).
 func (c *Child) Line(t *testing.T, timeout time.Duration) map[string]any {
 	t.Helper()
-	type r struct {
-		ch chan string
+	m, err := c.LineErr(t, timeout)
+	if err != nil {
+		t.Fatalf("%v", err)
 	}
+	return m
+}
+
+// LineErr is Line for callers OFF the test goroutine: it returns the
+// timeout/EOF condition as an error instead of calling t.Fatalf (a t.Fatalf
+// from a non-test goroutine silently Goexits that goroutine and deadlocks the
+// waiting test — observed on the first full run of T-CLAIM-01).
+func (c *Child) LineErr(t *testing.T, timeout time.Duration) (map[string]any, error) {
+	t.Helper()
 	ch := make(chan string, 1)
 	go func() {
 		line, err := c.stdout.ReadString('\n')
@@ -247,19 +259,18 @@ func (c *Child) Line(t *testing.T, timeout time.Duration) map[string]any {
 	select {
 	case line := <-ch:
 		if line == "" {
-			t.Fatalf("child exited before delivering a result line; output so far:\n%s", c.Transcript())
+			return nil, fmt.Errorf("child exited before delivering a result line; output so far:\n%s", c.Transcript())
 		}
 		var m map[string]any
 		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("bad result line %q: %v", line, err)
+			return nil, fmt.Errorf("bad result line %q: %w", line, err)
 		}
 		c.outMu.Lock()
 		c.outBuf.WriteString(line)
 		c.outMu.Unlock()
-		return m
+		return m, nil
 	case <-time.After(timeout):
-		t.Fatalf("no result line within %v; output:\n%s", timeout, c.Transcript())
-		return nil
+		return nil, fmt.Errorf("no result line within %v; output:\n%s", timeout, c.Transcript())
 	}
 }
 

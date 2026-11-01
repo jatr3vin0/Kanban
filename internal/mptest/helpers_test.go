@@ -44,17 +44,30 @@ func actorRefActor(ref string) models.Actor {
 type barrierAgent struct {
 	child    *Child
 	readyCh  <-chan struct{}
-	goPath   string
+	goFile   *os.File // parent's O_RDWR handle, held open for the whole test
 	fifoBase string
 }
 
 // startBarrier spawns the agent; readiness is a message on the ready FIFO
 // (§1.1), the go FIFO is written by releaseBarrier.
+//
+// The parent keeps its O_RDWR handle on the go FIFO until cleanup: a FIFO
+// whose every open fd is closed is destroyed by the kernel and its buffered
+// data is discarded, so a child that reaches its blocking O_RDONLY open after
+// the parent's open/write/close would block forever (observed: one silent
+// agent per run, the collect timeout, then the illegal-Fatalf hang). With the
+// handle held, the child's open always finds a writer and then reads the
+// buffered "go\n" line.
 func startBarrier(t *testing.T, agentBin, fifoDir string, env []string) *barrierAgent {
 	n := fifoSeq.Add(1)
 	base := fmt.Sprintf("b%d-%d", n, time.Now().UnixNano()%1000000)
 	ready := MakeFIFO(t, fifoDir, base+".ready")
 	goP := MakeFIFO(t, fifoDir, base+".go")
+	goF, err := os.OpenFile(goP, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open go fifo: %v", err)
+	}
+	t.Cleanup(func() { _ = goF.Close() })
 	readyCh := make(chan struct{})
 	go func() {
 		// Blocks until the child opens its writer side: readiness is a message.
@@ -70,7 +83,7 @@ func startBarrier(t *testing.T, agentBin, fifoDir string, env []string) *barrier
 		"LEDGERBOARD_TEST_READY_FIFO="+ready,
 		"LEDGERBOARD_TEST_GO_FIFO="+goP,
 	)
-	return &barrierAgent{child: StartAgent(t, agentBin, all...), readyCh: readyCh, goPath: goP, fifoBase: base}
+	return &barrierAgent{child: StartAgent(t, agentBin, all...), readyCh: readyCh, goFile: goF, fifoBase: base}
 }
 
 // waitReady blocks until all agents signal readiness (bounded).
@@ -84,37 +97,43 @@ func waitReady(t *testing.T, agents []*barrierAgent) {
 	}
 }
 
-// releaseBarrier signals every agent through its own go FIFO.
+// releaseBarrier signals every agent through its own go FIFO. The parent's
+// O_RDWR handle stays open (see startBarrier): the write buffers in the pipe
+// and the child reads it whenever its open lands, whichever wins the race.
 func releaseBarrier(t *testing.T, agents []*barrierAgent) {
 	for _, a := range agents {
-		f, err := os.OpenFile(a.goPath, os.O_RDWR, 0)
-		if err != nil {
-			t.Fatalf("open go fifo: %v", err)
+		if _, err := a.goFile.WriteString("go\n"); err != nil {
+			t.Fatalf("write go fifo: %v", err)
 		}
-		_, _ = f.WriteString("go\n")
-		_ = f.Close() // the line is in the pipe; the child's reader gets it
 	}
 }
 
-// collect reads one result line per child, in any order, bounded.
+// collect reads one result line per child, in any order, bounded. Children are
+// read from helper goroutines, so failures come back as errors and are
+// reported by t.Fatalf HERE, on the test goroutine (a t.Fatalf inside the
+// reader goroutine would silently Goexit it and deadlock this loop).
 func collect(t *testing.T, children []*Child, timeout time.Duration) []map[string]any {
 	out := make([]map[string]any, len(children))
-	results := make(chan indexedResult, len(children))
+	type indexed struct {
+		i   int
+		m   map[string]any
+		err error
+	}
+	results := make(chan indexed, len(children))
 	for i, c := range children {
 		go func(i int, c *Child) {
-			results <- indexedResult{i, c.Line(t, timeout)}
+			m, err := c.LineErr(t, timeout)
+			results <- indexed{i, m, err}
 		}(i, c)
 	}
 	for range children {
 		r := <-results
+		if r.err != nil {
+			t.Fatalf("child %d: %v", r.i, r.err)
+		}
 		out[r.i] = r.m
 	}
 	return out
-}
-
-type indexedResult struct {
-	i int
-	m map[string]any
 }
 
 func okOf(m map[string]any) bool {
