@@ -30,6 +30,14 @@ type Config struct {
 	// ClaimableStatuses is LEDGERBOARD_CLAIMABLE_STATUSES (C-CLAIM-3). `done`
 	// and `blocked` are never accepted in it.
 	ClaimableStatuses []models.Status
+
+	// MemoryDelivery is MEMORY_DELIVERY (C-OUTBOX-14): exactly `off` or `worker`,
+	// defaulting to `off` per the spec. With `off` no worker goroutine starts and
+	// outbox rows accumulate visibly (C-OUTBOX-15).
+	MemoryDelivery string
+	// WorkerPollMS is LEDGERBOARD_WORKER_POLL_MS (C-CONV-10): how long the
+	// delivery loop sleeps when nothing is claimable. 1000 is the contract default.
+	WorkerPollMS int64
 }
 
 // Load parses CLI flags and environment variables into a Config.
@@ -93,6 +101,21 @@ func load(args []string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid LEDGERBOARD_CLAIMABLE_STATUSES: %w", err)
 	}
 	cfg.ClaimableStatuses = statuses
+
+	// C-OUTBOX-14: exactly `off` or `worker`, default `off`. Anything else stops
+	// the server naming the variable, never a silent fallback to off.
+	delivery, err := store.ParseMemoryDelivery(envStr("MEMORY_DELIVERY", store.DefaultMemoryDelivery))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.MemoryDelivery = delivery
+
+	// C-CONV-10: a positive integer, default 1000 ms.
+	pollMS, err := envInt64Strict("LEDGERBOARD_WORKER_POLL_MS", store.DefaultWorkerPollMS, 1)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.WorkerPollMS = pollMS
 
 	if err := cfg.validate(); err != nil {
 		return Config{}, err

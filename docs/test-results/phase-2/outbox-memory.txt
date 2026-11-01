@@ -1,0 +1,47 @@
+# Phase 2 slice 3 — outbox delivery + memory mock adapter (store level)
+
+Date: 2026-11-01T22:20:31Z  Branch: phase-2/outbox-memory
+
+## gofmt / build / vet
+```
+internal/store/handoff_riders_test.go
+gofmt clean above (no output = clean)
+go build ./... : OK
+go vet ./... : OK
+```
+
+## go test ./... -count=1
+```
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.058s
+?   	github.com/rgracey/kanban-mcp/internal/apperr	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/config	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.008s
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.223s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.105s
+ok  	github.com/rgracey/kanban-mcp/internal/memory	0.003s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/store	1.547s
+```
+
+## New tests in this slice (all passing)
+- TestOutboxDeliveryOffByDefault (C-OUTBOX-14/15/18)
+- TestOutboxSuccessPath (C-OUTBOX-2/22/24)
+- TestOutboxFailureClassification (C-OUTBOX-10/11, C-SCHEMA-16 scrub)
+- TestOutboxRetryScheduleAndExhaustion (C-OUTBOX-10)
+- TestOutboxDeadLetterOperatorRetry (C-OUTBOX-13, C-AUTH-7)
+- TestOutboxAuditEconomy (C-OUTBOX-24)
+- TestOutboxStuckWorkerRecovery (C-OUTBOX-5/6/7, crashpoint memory.post_adapter_write)
+- TestOutboxAckFencing (C-OUTBOX-7)
+- TestOutboxAtLeastOnceStableIDDedup (C-OUTBOX-8/9, crashpoint memory.pre_ack_commit)
+- TestOutboxRestartSurvivalDelivery (T-HAND-09 delivery leg, C-OUTBOX-16)
+- TestOutboxWorkerLoopAndPollKnob (C-OUTBOX-17)
+- internal/memory: TestMockWriteIsIdempotentOnID, TestMockRecordsExactlyTheMemoryWrite, TestMockBehaviourClassification, TestMockSearcherDetection (C-OUTBOX-19/21/22)
+- internal/config: delivery_test.go (MEMORY_DELIVERY default off, invalid value, poll knob)
+- TestHandoffNonFiniteConfidenceNamesTheField, TestHandoffSchemaVersionTypeNamesTheField (QA slice-2 riders)
+
+## Deferred to slice 4 (multi-process legs)
+- two worker processes on one file racing for the same row (C-OUTBOX-5/17 second-process leg)
+- T-CRASH-c full multi-process restart matrix; T-MEM-01 second-process safety; T-MEM-06 with a real second worker process
