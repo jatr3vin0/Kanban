@@ -1,0 +1,8 @@
+# Phase 2 slice 1 — commands
+
+gofmt -l . ; go build ./... ; go vet ./... ; go test ./... -count=1
+
+go test ./internal/db/ -run "TestDSN|TestForeignKeys|TestOpenReturns|TestOpenReadPool|TestDirty" -v
+go test ./internal/db/ -run TestMigrate -v
+go test ./internal/store/ -run "TestClaim|TestRenew|TestRelease|TestGeneration" -v
+go test ./internal/crashpoint/ ./internal/clocksource/ -v

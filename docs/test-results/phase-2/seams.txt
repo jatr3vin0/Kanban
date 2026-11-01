@@ -1,0 +1,30 @@
+=== RUN   TestVocabularyIsClosed
+--- PASS: TestVocabularyIsClosed (0.00s)
+=== RUN   TestUnarmedIsInert
+--- PASS: TestUnarmedIsInert (0.00s)
+=== RUN   TestUnknownNamesAreIgnored
+--- PASS: TestUnknownNamesAreIgnored (0.00s)
+=== RUN   TestArmedNamesParsed
+--- PASS: TestArmedNamesParsed (0.00s)
+=== RUN   TestArmedPointKillsOwnProcess
+--- PASS: TestArmedPointKillsOwnProcess (0.00s)
+=== RUN   TestUnarmedSubprocessSurvives
+--- PASS: TestUnarmedSubprocessSurvives (0.00s)
+=== RUN   TestCrashHelperProcess
+    crashpoint_test.go:143: helper process body; only runs as a subprocess
+--- SKIP: TestCrashHelperProcess (0.00s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.011s
+=== RUN   TestRealClockIsDefault
+--- PASS: TestRealClockIsDefault (0.00s)
+=== RUN   TestExplicitRealMode
+--- PASS: TestExplicitRealMode (0.00s)
+=== RUN   TestFakeClockReadsTheFile
+--- PASS: TestFakeClockReadsTheFile (0.00s)
+=== RUN   TestFakeClockWithoutFileIsAStartupError
+--- PASS: TestFakeClockWithoutFileIsAStartupError (0.00s)
+=== RUN   TestInvalidModeIsAStartupError
+--- PASS: TestInvalidModeIsAStartupError (0.00s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.002s
+exit=0
