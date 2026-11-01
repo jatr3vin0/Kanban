@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/rgracey/kanban-mcp/internal/crashpoint"
@@ -54,8 +55,12 @@ func (s *SQLiteStore) StartOutboxWorker(ctx context.Context, cfg OutboxWorkerCon
 	cfg = cfg.normalize()
 	go func() {
 		// The loop only returns when the shutdown context is done; a delivery
-		// failure is recorded on its row, never fatal to the process.
-		_ = s.runOutboxWorker(ctx, cfg)
+		// failure is recorded on its row, never fatal to the process. If it does
+		// return for any other reason, all delivery for this process has stopped
+		// (C-OUTBOX-17) — that must leave a trace, never be discarded.
+		if err := s.runOutboxWorker(ctx, cfg); err != nil {
+			slog.Error("outbox worker stopped", "worker_id", cfg.WorkerID, "err", err)
+		}
 	}()
 	return nil
 }
@@ -73,6 +78,15 @@ func (s *SQLiteStore) RunOutboxWorker(ctx context.Context, cfg OutboxWorkerConfi
 // runOutboxWorker is C-OUTBOX-17's loop: claim one row at a time, deliver it,
 // and when nothing is claimable sleep PollMS on a select over the shutdown
 // context — so shutdown never waits out a poll interval.
+//
+// A row-level error is never fatal to the loop. One stuck row, one transient
+// database error or one locked file must not stop delivery for the whole board,
+// and a loop that dies with nothing in the log and nothing in the outbox to say
+// so is the failure mode this product exists to make impossible. The error is
+// logged and the loop continues after the normal poll sleep; it returns nil only
+// when ctx is done. The per-row outcome decision stays where it is: the row's own
+// `WHERE ... AND lease_owner = ?` makes a stale worker harmless (C-OUTBOX-7), so
+// the loop only has to survive.
 func (s *SQLiteStore) runOutboxWorker(ctx context.Context, cfg OutboxWorkerConfig) error {
 	poll := time.Duration(cfg.PollMS) * time.Millisecond
 	for {
@@ -84,7 +98,13 @@ func (s *SQLiteStore) runOutboxWorker(ctx context.Context, cfg OutboxWorkerConfi
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			slog.Error("outbox worker iteration failed", "worker_id", cfg.WorkerID, "err", err)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(poll):
+			}
+			continue
 		}
 		if processed {
 			continue

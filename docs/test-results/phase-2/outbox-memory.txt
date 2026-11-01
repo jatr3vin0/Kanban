@@ -1,32 +1,63 @@
 # Phase 2 slice 3 — outbox delivery + memory mock adapter (store level)
 
-Date: 2026-11-01T22:20:31Z  Branch: phase-2/outbox-memory
+Branch: phase-2/outbox-memory, on top of 20198df (the revision the architect reviewed).
+First captured 2026-11-01T22:20:31Z; **re-captured 2026-11-01T22:43:51Z** after the PR #6 design
+review (`/home/team/shared/design/phase-2-slice-3-review.md`, PR comment issuecomment-6564890617).
+Every block below is from the re-capture; the earlier capture is superseded because the code changed.
 
 ## gofmt / build / vet
+
+Review item F4: the previous block printed `internal/store/handoff_riders_test.go` directly above the
+words "gofmt clean above (no output = clean)". A filename *is* output, so that block contradicted
+itself. This is the corrected capture.
+
 ```
-internal/store/handoff_riders_test.go
-gofmt clean above (no output = clean)
-go build ./... : OK
-go vet ./... : OK
+$ gofmt -l .
+(no output above = every file is gofmt-clean)
+$ go build ./...
+exit 0 (no output)
+$ go vet ./...
+exit 0 (no output)
 ```
 
 ## go test ./... -count=1
+
 ```
 ?   	github.com/rgracey/kanban-mcp	[no test files]
 ?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
-ok  	github.com/rgracey/kanban-mcp/internal/api	0.058s
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.067s
 ?   	github.com/rgracey/kanban-mcp/internal/apperr	[no test files]
-ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.005s
 ok  	github.com/rgracey/kanban-mcp/internal/config	0.003s
-ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.008s
-ok  	github.com/rgracey/kanban-mcp/internal/db	0.223s
-ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.105s
-ok  	github.com/rgracey/kanban-mcp/internal/memory	0.003s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.011s
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.202s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.075s
+ok  	github.com/rgracey/kanban-mcp/internal/memory	0.004s
 ?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
-ok  	github.com/rgracey/kanban-mcp/internal/store	1.547s
+ok  	github.com/rgracey/kanban-mcp/internal/store	1.673s
+```
+
+Exact counts (`go test ./... -count=1 -v`): **116 top-level tests PASS, 0 FAIL**.
+`internal/store` alone: **63 top-level tests PASS** (0 FAIL), **71 subtests PASS** (0 FAIL),
+134 `--- PASS` lines in total.
+
+### Race detector
+
+`go test ./... -count=1 -race` — exit 0, no data race reported:
+
+```
+ok  	github.com/rgracey/kanban-mcp/internal/api	1.589s
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	1.013s
+ok  	github.com/rgracey/kanban-mcp/internal/config	1.016s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	2.040s
+ok  	github.com/rgracey/kanban-mcp/internal/db	2.573s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	2.061s
+ok  	github.com/rgracey/kanban-mcp/internal/memory	1.015s
+ok  	github.com/rgracey/kanban-mcp/internal/store	21.610s
 ```
 
 ## New tests in this slice (all passing)
+
 - TestOutboxDeliveryOffByDefault (C-OUTBOX-14/15/18)
 - TestOutboxSuccessPath (C-OUTBOX-2/22/24)
 - TestOutboxFailureClassification (C-OUTBOX-10/11, C-SCHEMA-16 scrub)
@@ -38,10 +69,61 @@ ok  	github.com/rgracey/kanban-mcp/internal/store	1.547s
 - TestOutboxAtLeastOnceStableIDDedup (C-OUTBOX-8/9, crashpoint memory.pre_ack_commit)
 - TestOutboxRestartSurvivalDelivery (T-HAND-09 delivery leg, C-OUTBOX-16)
 - TestOutboxWorkerLoopAndPollKnob (C-OUTBOX-17)
+- **TestOutboxDeliveryAfterTicketDeleted** (review F1; C-SCHEMA-13, C-OUTBOX-2, C-OUTBOX-24, C-AUDIT-9)
+- **TestOutboxRetryAfterTicketDeleted** (review F1; C-OUTBOX-13, C-SCHEMA-13, C-AUDIT-9)
+- **TestOutboxWorkerSurvivesErrors** (review F2; C-OUTBOX-17)
 - internal/memory: TestMockWriteIsIdempotentOnID, TestMockRecordsExactlyTheMemoryWrite, TestMockBehaviourClassification, TestMockSearcherDetection (C-OUTBOX-19/21/22)
 - internal/config: delivery_test.go (MEMORY_DELIVERY default off, invalid value, poll knob)
 - TestHandoffNonFiniteConfidenceNamesTheField, TestHandoffSchemaVersionTypeNamesTheField (QA slice-2 riders)
 
+## Review fixes applied (architect review of PR #6, FIX-FIRST)
+
+| Item | Change | Where |
+|---|---|---|
+| F1 (blocking) | A delivery transition commits even when its ticket has been deleted: one guarded `INSERT … SELECT … WHERE EXISTS (SELECT 1 FROM tickets WHERE id = ?)` helper, applied at all three audit call sites (ack, terminal failure, operator retry). The transition is never rolled back for want of an audit (C-AUDIT-9). | `internal/store/claim.go` (`insertAuditIfTicketExists`, `auditRowArgs`), `internal/store/outbox.go` (3 call sites) |
+| F2 (blocking) | The delivery loop logs a failed iteration and continues; it returns only on context cancellation. `StartOutboxWorker` no longer discards the goroutine's terminal error — it logs it (`slog`, matching `main.go`'s default JSON logger). | `internal/store/outbox_worker.go` |
+| F3 | The reclaim pre-pass clears `lease_owner` and `lease_expires_at` with the status, so an `uncertain` row is never rendered as leased to a worker that is gone. | `internal/store/outbox.go` (`ReclaimExpiredOutboxRows`) |
+| F4 | The operator retry maps a residual driver error instead of surfacing it raw: a lock stays `database_busy` (C-ERR-7), anything else becomes a typed `internal` with the cause logged, never in the response (C-ERR-6). C-OUTBOX-13's 403/404/409 guards are unchanged. | `internal/store/outbox.go` (`retryOutboxErr`) |
+| F5 | README states plainly that `MEMORY_DELIVERY=worker` is refused in v1 and that the mock adapter is test-only. | `README.md` |
+
+### The defect, reproduced and then closed
+
+Before the fix, deleting a ticket left its outbox rows (C-SCHEMA-13) with nowhere to write their
+audit, so the ack rolled back and the row cycled `processing → uncertain → processing`, calling the
+adapter every poll:
+
+```
+ack outbox row 9e9b5069a87d45ebab5de00af959593a: constraint failed: FOREIGN KEY constraint failed (787)
+row status=processing attempts=1..3 external=<nil>   adapter calls = 3
+```
+
+### Falsifiability — each new regression test fails against the pre-fix code
+
+Reverted the fix in a throwaway copy, ran the test, restored the tree (verified by `git status`):
+
+```
+== F2 reverted (runOutboxWorker returns on the first error): TestOutboxWorkerSurvivesErrors ==
+--- FAIL: TestOutboxWorkerSurvivesErrors (0.01s)
+    outbox_test.go: the loop returned after an iteration error instead of logging and continuing: sql: database is closed
+
+== F1 reverted at the ack (unguarded insertAudit): TestOutboxDeliveryAfterTicketDeleted ==
+--- FAIL: TestOutboxDeliveryAfterTicketDeleted (0.01s)
+    Error: Received unexpected error:
+           ack outbox row 9e9b5069a87d45ebab5de00af959593a: constraint failed: FOREIGN KEY constraint failed (787)
+```
+
+With the fix in place, the same test drains both rows in one attempt each — `succeeded`, external id
+and `delivered_at` recorded, `attempts = 1`, two adapter calls for two writes, zero `ticket_events`
+rows (the audit is skipped, not invented), and a second pass claims nothing.
+
+## Scope note for QA (A9)
+
+T-HAND-09's full multi-process row is **not** closed by this slice: this slice closes the
+store-level delivery leg only (see A9 in the review, which replaces the plan's phantom
+`tx.post_commit` point). Do not credit the whole row on this PR.
+
 ## Deferred to slice 4 (multi-process legs)
+
 - two worker processes on one file racing for the same row (C-OUTBOX-5/17 second-process leg)
 - T-CRASH-c full multi-process restart matrix; T-MEM-01 second-process safety; T-MEM-06 with a real second worker process
+- T-HAND-09's full multi-process row (this slice closes the store-level delivery leg only; see A9).

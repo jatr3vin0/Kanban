@@ -691,6 +691,10 @@ func TestOutboxStuckWorkerRecovery(t *testing.T) {
 	assert.Equal(t, OutboxUncertain, row.Status)
 	assert.GreaterOrEqual(t, row.Attempts, int64(1))
 	assert.Nil(t, row.ExternalID)
+	// The lapsed lease is cleared with the status, so an `uncertain` row is never
+	// rendered as leased to a worker that is gone (§6.2, C-OUTBOX-3).
+	assert.Nil(t, row.LeaseOwner)
+	assert.Nil(t, row.LeaseExpires)
 
 	uncertainRows, err := h.store.ListOutboxRows(t.Context(), OutboxFilter{Status: OutboxUncertain})
 	require.NoError(t, err)
@@ -937,6 +941,146 @@ func TestOutboxWorkerLoopAndPollKnob(t *testing.T) {
 	select {
 	case err := <-done:
 		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOutboxWorker did not return promptly after cancellation")
+	}
+}
+
+// ---- F1: a delivery transition commits when its ticket is gone ------------
+
+// TestOutboxDeliveryAfterTicketDeleted is the regression test for the audit-FK
+// trap. C-SCHEMA-13 deliberately keeps outbox rows alive after their ticket is
+// deleted, while ticket_events has a NOT NULL FK to tickets (0001_init.up.sql:34)
+// that cascades. Before the guarded insert every delivery transition for a
+// deleted ticket failed on that FK: the ack never committed, so the row cycled
+// processing -> uncertain -> processing forever and the adapter was called again
+// on every poll. After it the transition commits, the audit is simply absent
+// (C-AUDIT-9), and there is exactly one adapter call per write.
+func TestOutboxDeliveryAfterTicketDeleted(t *testing.T) {
+	h := newOutboxHarness(t)
+	ticketID, ids := handoffWithWrites(t, h.store, 2)
+
+	require.NoError(t, h.store.DeleteTicket(t.Context(), ticketID))
+	// The ticket's audits cascade away; its obligations do not (C-SCHEMA-13).
+	assert.EqualValues(t, 0, countRows(t, h.store,
+		`SELECT COUNT(*) FROM ticket_events WHERE ticket_id = ?`, ticketID))
+	assert.EqualValues(t, 2, countRows(t, h.store,
+		`SELECT COUNT(*) FROM outbox WHERE ticket_id = ?`, ticketID))
+
+	mock := h.mock(memory.MockConfig{})
+	for i := 0; i < 3; i++ {
+		processed, err := h.store.ProcessOutboxOnce(t.Context(), h.workerCfg(mock))
+		require.NoError(t, err, "a delivery transition for a deleted ticket must commit (C-AUDIT-9)")
+		if !processed {
+			break
+		}
+	}
+
+	for _, id := range ids {
+		row, err := h.store.GetOutboxRow(t.Context(), id)
+		require.NoError(t, err)
+		assert.Equal(t, OutboxSucceeded, row.Status)
+		require.NotNil(t, row.ExternalID)
+		assert.Equal(t, memory.ExternalIDFor(id), *row.ExternalID)
+		require.NotNil(t, row.DeliveredAt)
+		assert.EqualValues(t, 1, row.Attempts, "one attempt: the ack committed, so there is no retry storm")
+		assert.Nil(t, row.LastError)
+		assert.Nil(t, row.LeaseOwner)
+	}
+
+	// Exactly one adapter call per write — not one per iteration.
+	calls := h.calls()
+	require.Len(t, calls, 2, "the adapter must not be called again once the ack committed")
+	assert.ElementsMatch(t, ids, []string{calls[0].ID, calls[1].ID})
+
+	// The audit row was skipped, not invented: the ticket is gone and its events
+	// cascaded, so nothing anywhere claims the delivery was audited (C-AUDIT-9).
+	assert.EqualValues(t, 0, countRows(t, h.store, `SELECT COUNT(*) FROM ticket_events`))
+
+	summary, err := h.store.OutboxSummary(t.Context())
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, summary[OutboxSucceeded])
+	assert.EqualValues(t, 0, summary[OutboxPending])
+	assert.EqualValues(t, 0, summary[OutboxFailed])
+	assert.EqualValues(t, 0, summary[OutboxUncertain])
+
+	// And nothing is left to claim.
+	processed, err := h.store.ProcessOutboxOnce(t.Context(), h.workerCfg(mock))
+	require.NoError(t, err)
+	assert.False(t, processed)
+	assert.Len(t, h.calls(), 2)
+}
+
+// TestOutboxRetryAfterTicketDeleted proves the operator's dead-letter retry still
+// works once the ticket is gone (C-OUTBOX-13, C-SCHEMA-13): the reset commits, no
+// audit row is invented for a ticket that no longer exists, and the recovered row
+// delivers.
+func TestOutboxRetryAfterTicketDeleted(t *testing.T) {
+	h := newOutboxHarness(t)
+	ticketID, ids := handoffWithWrites(t, h.store, 1)
+	writeID := ids[0]
+
+	// Dead-letter it, then delete the ticket the obligation outlives.
+	_, err := h.store.ProcessOutboxOnce(t.Context(),
+		h.workerCfg(h.mock(memory.MockConfig{Behaviour: memory.BehaviourPermanent})))
+	require.NoError(t, err)
+	row, err := h.store.GetOutboxRow(t.Context(), writeID)
+	require.NoError(t, err)
+	require.Equal(t, OutboxFailed, row.Status)
+	require.NoError(t, h.store.DeleteTicket(t.Context(), ticketID))
+
+	human := models.Actor{Type: models.ActorHuman, ID: "alice"}
+	retried, err := h.store.RetryOutboxRow(t.Context(), OutboxRetryRequest{
+		WriteID: writeID, Actor: human, RequestID: "req-retry-deleted",
+	})
+	require.NoError(t, err, "C-OUTBOX-13: the retry must not fail on a deleted ticket's audit")
+	assert.Equal(t, OutboxPending, retried.Status)
+	assert.EqualValues(t, 0, retried.Attempts)
+	assert.Nil(t, retried.NextAttemptAt)
+	assert.Nil(t, retried.LastError)
+	assert.EqualValues(t, 0, countRows(t, h.store, `SELECT COUNT(*) FROM ticket_events`))
+
+	// The recovered row delivers normally.
+	processed, err := h.store.ProcessOutboxOnce(t.Context(), h.workerCfg(h.mock(memory.MockConfig{})))
+	require.NoError(t, err)
+	require.True(t, processed)
+	got, err := h.store.GetOutboxRow(t.Context(), writeID)
+	require.NoError(t, err)
+	assert.Equal(t, OutboxSucceeded, got.Status)
+	assert.Equal(t, memory.ExternalIDFor(writeID), *got.ExternalID)
+}
+
+// ---- F2: a row-level error must not kill the loop --------------------------
+
+// TestOutboxWorkerSurvivesErrors is F2's regression test: every iteration fails
+// here (the write handle is closed), and the loop must still be running until its
+// context is cancelled. Before the fix it returned on the first error and
+// StartOutboxWorker discarded that return, so delivery stopped for the whole
+// process with nothing in the log and nothing in the outbox to say so.
+func TestOutboxWorkerSurvivesErrors(t *testing.T) {
+	h := newOutboxHarness(t)
+	handoffWithWrites(t, h.store, 1)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// From here on every ProcessOutboxOnce fails: the pool is closed.
+	require.NoError(t, h.store.db.Close())
+
+	done := make(chan error, 1)
+	cfg := OutboxWorkerConfig{WorkerID: "survivor", PollMS: 5, Adapter: h.mock(memory.MockConfig{})}
+	go func() { done <- h.store.RunOutboxWorker(ctx, cfg) }()
+
+	select {
+	case err := <-done:
+		t.Fatalf("the loop returned after an iteration error instead of logging and continuing: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err, "a cancelled context is a clean exit, not an error")
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunOutboxWorker did not return promptly after cancellation")
 	}

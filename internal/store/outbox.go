@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -232,6 +233,12 @@ func scanOutboxRow(sc interface{ Scan(...any) error }) (OutboxRow, error) {
 // and C-OUTBOX-3 requires it to be visible until it resolves. Committing it
 // separately costs one write transaction per worker iteration and buys the
 // observable state the contract promises.
+//
+// The lease is cleared with the status. §6.2 defines `lease_owner` as "worker id
+// holding the processing lease", and every other transition clears both fields
+// (ack, fail, retry); leaving them set would render an `uncertain` row — the
+// state that must be honest and visible (C-OUTBOX-3) — as leased to a worker
+// that is gone. C-OUTBOX-6 constrains the guard, not the SET list.
 func (s *SQLiteStore) ReclaimExpiredOutboxRows(ctx context.Context) (int64, error) {
 	nowMS := s.clock.NowMS()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -242,7 +249,8 @@ func (s *SQLiteStore) ReclaimExpiredOutboxRows(ctx context.Context) (int64, erro
 
 	res, err := tx.ExecContext(ctx, `
         UPDATE outbox
-           SET status = 'uncertain', updated_at = ?
+           SET status = 'uncertain', lease_owner = NULL, lease_expires_at = NULL,
+               updated_at = ?
          WHERE status = 'processing' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
 		nowMS, nowMS)
 	if err != nil {
@@ -387,7 +395,7 @@ func (s *SQLiteStore) AckOutboxRow(ctx context.Context, row OutboxRow, workerID,
 		return false, nil
 	}
 
-	if err := insertAudit(ctx, tx, row.TicketID, models.EventMemoryDelivered,
+	if err := insertAuditIfTicketExists(ctx, tx, row.TicketID, models.EventMemoryDelivered,
 		deliveryActor(workerID), map[string]any{
 			"request_id":  row.RequestID,
 			"write_id":    row.ID,
@@ -458,7 +466,7 @@ func (s *SQLiteStore) FailOutboxRow(ctx context.Context, row OutboxRow, workerID
 	}
 
 	if status == OutboxFailed {
-		if err := insertAudit(ctx, tx, row.TicketID, models.EventMemoryDeliveryFailed,
+		if err := insertAuditIfTicketExists(ctx, tx, row.TicketID, models.EventMemoryDeliveryFailed,
 			deliveryActor(workerID), map[string]any{
 				"request_id": row.RequestID,
 				"write_id":   row.ID,
@@ -504,7 +512,7 @@ func (s *SQLiteStore) RetryOutboxRow(ctx context.Context, req OutboxRetryRequest
 
 	prior, found, err := readOutboxRowTx(ctx, tx, req.WriteID)
 	if err != nil {
-		return OutboxRow{}, err
+		return OutboxRow{}, retryOutboxErr(req.WriteID, err)
 	}
 	if !found {
 		return OutboxRow{}, apperr.WithDetails(apperr.CodeNotFound,
@@ -519,11 +527,11 @@ func (s *SQLiteStore) RetryOutboxRow(ctx context.Context, req OutboxRetryRequest
          WHERE id = ? AND status = 'failed'`,
 		nowMS, req.WriteID)
 	if err != nil {
-		return OutboxRow{}, mapDriverErr(err)
+		return OutboxRow{}, retryOutboxErr(req.WriteID, err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return OutboxRow{}, err
+		return OutboxRow{}, retryOutboxErr(req.WriteID, err)
 	}
 	if affected != 1 {
 		return OutboxRow{}, apperr.WithDetails(apperr.CodeOutboxNotRetryable,
@@ -535,23 +543,47 @@ func (s *SQLiteStore) RetryOutboxRow(ctx context.Context, req OutboxRetryRequest
 	// so this uses `outbox_retried` with the row's previous status — a contract
 	// gap reported to the architect rather than papered over by reusing
 	// memory_delivery_failed, which would assert a failure that no longer holds.
-	if err := insertAudit(ctx, tx, prior.TicketID, models.EventOutboxRetried,
+	//
+	// The obligation outlives its ticket (C-SCHEMA-13), so the audit is written
+	// through the guarded insert: a deleted ticket means no audit row, never a
+	// failed reset (C-AUDIT-9).
+	if err := insertAuditIfTicketExists(ctx, tx, prior.TicketID, models.EventOutboxRetried,
 		req.Actor, map[string]any{
 			"request_id":      req.RequestID,
 			"write_id":        prior.ID,
 			"previous_status": prior.Status,
 		}, nowMS); err != nil {
-		return OutboxRow{}, err
+		return OutboxRow{}, retryOutboxErr(req.WriteID, err)
 	}
 
 	updated, _, err := readOutboxRowTx(ctx, tx, req.WriteID)
 	if err != nil {
-		return OutboxRow{}, err
+		return OutboxRow{}, retryOutboxErr(req.WriteID, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return OutboxRow{}, mapDriverErr(err)
 	}
 	return updated, nil
+}
+
+// retryOutboxErr maps a failure inside the operator's retry to the error shape
+// C-OUTBOX-13 defines for that endpoint. The capability and guard failures are
+// decided above (403 forbidden, 404 not_found, 409 outbox_not_retryable); what is
+// left is infrastructure, so a driver error is mapped first (a lock becomes
+// database_busy, C-ERR-7) and anything still untyped becomes a typed `internal`
+// rather than a raw driver error reaching the transport as an unclassified 500.
+// The real cause is logged and never put in the response (C-ERR-6).
+func retryOutboxErr(writeID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	mapped := mapDriverErr(err)
+	if _, ok := apperr.From(mapped); ok {
+		return mapped
+	}
+	slog.Error("outbox retry failed", "write_id", writeID, "err", mapped)
+	return apperr.WithDetails(apperr.CodeInternal,
+		"the outbox retry could not be completed", map[string]any{"id": writeID})
 }
 
 // GetOutboxRow reads one row by id.
