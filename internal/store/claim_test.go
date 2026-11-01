@@ -872,3 +872,62 @@ func sortedIDs(ids []string) []string {
 }
 
 var _ = context.Background
+
+// TestClaimNextAuditPreviousHolder is the R2 regression test (§1.8 `claimed`,
+// C-AUDIT-3, C-INV-8): claim_next's audit payload reports the holder the row
+// actually had immediately before the transition, in both arms of its guard.
+// A hardcoded null was truthful only for the unclaimed arm; on a lapsed
+// takeover it asserted "this row never had a holder" in the same payload that
+// asserted "there was a previous generation".
+func TestClaimNextAuditPreviousHolder(t *testing.T) {
+	t.Run("unclaimed row reports null", func(t *testing.T) {
+		s, _, _ := setupClaimStore(t)
+		board, ticketID := newBoardAndTicket(t, s, models.StatusTodo, models.PriorityMedium)
+
+		got, err := s.ClaimNext(t.Context(), ClaimNextRequest{
+			BoardID: board, Actor: agent("picker-1"), RequestID: "req-n1",
+		})
+		require.NoError(t, err)
+		require.Equal(t, ticketID, got.ID)
+
+		events := claimEvents(t, s, ticketID)
+		require.Len(t, events, 1)
+		assert.Nil(t, events[0].Payload["previous_holder"],
+			"a genuinely unclaimed row has no previous holder")
+		assert.Equal(t, float64(0), events[0].Payload["previous_generation"])
+		assert.Equal(t, float64(1), events[0].Payload["generation"])
+		assert.Equal(t, "claim_next", events[0].Payload["source"])
+	})
+
+	t.Run("lapsed takeover reports the lapsed holder", func(t *testing.T) {
+		s, _, clock := setupClaimStore(t)
+		board, ticketID := newBoardAndTicket(t, s, models.StatusTodo, models.PriorityMedium)
+
+		// An agent takes the ticket and then stops renewing: the row keeps its
+		// holder and goes in_progress with an expired lease, which is exactly the
+		// second arm of claim_next's guard (C-CLAIM-12).
+		first, err := s.Claim(t.Context(), ClaimRequest{
+			TicketID: ticketID, Actor: agent("dead-agent"), RequestID: "req-1",
+		})
+		require.NoError(t, err)
+		require.Equal(t, int64(1), first.Claim.Generation)
+		clock.Advance(DefaultLeaseTTLMS + 1000)
+
+		got, err := s.ClaimNext(t.Context(), ClaimNextRequest{
+			BoardID: board, Actor: agent("picker-2"), RequestID: "req-n2",
+		})
+		require.NoError(t, err)
+		require.Equal(t, ticketID, got.ID)
+		require.Equal(t, int64(2), got.Claim.Generation, "the takeover bumps the generation")
+
+		events := claimEvents(t, s, ticketID)
+		require.Len(t, events, 2)
+		ev := events[1]
+		assert.Equal(t, models.EventClaimed, ev.Type)
+		assert.Equal(t, "claim_next", ev.Payload["source"])
+		assert.Equal(t, "dead-agent", ev.Payload["previous_holder"],
+			"the lapsed holder is the previous holder; null here contradicted previous_generation")
+		assert.Equal(t, float64(1), ev.Payload["previous_generation"])
+		assert.Equal(t, float64(2), ev.Payload["generation"])
+	})
+}

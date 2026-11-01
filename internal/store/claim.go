@@ -165,10 +165,21 @@ func (s *SQLiteStore) ClaimNext(ctx context.Context, req ClaimNextRequest) (Clai
 	}
 	defer tx.Rollback()
 
+	// The pre-transition values the §1.8 `claimed` payload must report are read
+	// once, inside the write transaction and before the mutation (C-CONV-4 as
+	// amended by A1). This read decides nothing — the UPDATE below picks the
+	// row and its RETURNING reports what it did — and it cannot disagree with
+	// it either: the transaction holds the write lock, so no other writer can
+	// change which row is claimable between the two statements.
+	prior, found, err := s.readClaimNextCandidate(ctx, tx, req.BoardID, nowMS)
+	if err != nil {
+		return ClaimedTicket{}, err
+	}
+
 	var id string
 	var generation, version int64
-	err = tx.QueryRowContext(ctx, s.claimNextStatement(), s.claimNextArgs(req.Actor, req.BoardID, nowMS)...).
-		Scan(&id, &generation, &version)
+	query, args := s.claimNextStatement(req.Actor, req.BoardID, nowMS)
+	err = tx.QueryRowContext(ctx, query, args...).Scan(&id, &generation, &version)
 	// The statement returns version for callers that want it; the entity read
 	// back below is the authoritative copy, so the returned value is not reused.
 	_ = version
@@ -183,22 +194,31 @@ func (s *SQLiteStore) ClaimNext(ctx context.Context, req ClaimNextRequest) (Clai
 		return ClaimedTicket{}, mapDriverErr(err)
 	}
 
+	if !found || prior.ID != id {
+		// Unreachable while the write lock is held: the same predicate and the
+		// same ORDER BY chose both rows. If it ever fires, refuse to write an
+		// audit row whose pre-transition values belong to another ticket.
+		return ClaimedTicket{}, apperr.New(apperr.CodeInternal,
+			"claim_next pre-read disagreed with the claim statement")
+	}
 	crashpoint.Hit(crashpoint.ClaimPreCommit)
 
 	ticket, _, err := readClaimedTicket(ctx, tx, id, nowMS)
 	if err != nil {
 		return ClaimedTicket{}, err
 	}
-	// claim_next has no pre-transition row to report (the id was chosen by the
-	// same statement), so previous_holder is always null here: the guard admits
-	// only a ticket whose lease is free.
+	// previous_holder is the holder the row had immediately before this
+	// transition: the lapsed holder's id when claim_next takes over a lapsed
+	// lease, null only when the row was genuinely unclaimed (§1.8, A2). The
+	// guard admits both arms, so a hardcoded null here would contradict the
+	// previous_generation written beside it.
 	if err := insertAudit(ctx, tx, id, models.EventClaimed, req.Actor, map[string]any{
 		"request_id":          req.RequestID,
 		"generation":          generation,
 		"actor_type":          string(req.Actor.Type),
 		"lease_expires_at":    derefMS(ticket.Claim.ExpiresAtMS),
-		"previous_holder":     nil,
-		"previous_generation": generation - 1,
+		"previous_holder":     derefString(prior.Claim.Holder),
+		"previous_generation": prior.Claim.Generation,
 		"source":              "claim_next",
 	}, nowMS); err != nil {
 		return ClaimedTicket{}, err
@@ -406,18 +426,14 @@ func (s *SQLiteStore) claimStatement(req ClaimRequest, nowMS int64) (string, []a
 	return query, args
 }
 
-// claimNextStatement is C-CLAIM-12's single statement, verbatim: the id is
-// chosen and mutated by the same UPDATE, with the priority CASE copied from
+// claimNextSelection is the row-selection half of C-CLAIM-12's statement: the
+// board predicate, the blocker guard and the priority CASE copied from
 // ListTickets/ReadyTickets (priority is TEXT, so a numeric sort is wrong).
-func (s *SQLiteStore) claimNextStatement() string {
-	statusList, _ := s.claimStatusArms()
-	return `
-        UPDATE tickets
-           SET status = 'in_progress', lease_holder = ?, lease_holder_type = ?,
-               lease_acquired_at = ?, lease_expires_at = ?,
-               lease_generation = lease_generation + 1, lease_renewals = 0,
-               version = version + 1, updated_at = ?
-         WHERE id = (
+// One predicate, two readers: the UPDATE that claims the row and the read of
+// its pre-transition values, so the two cannot disagree about which row it is.
+func (s *SQLiteStore) claimNextSelection(boardID string, nowMS int64) (string, []any) {
+	statusList, statusArgs := s.claimStatusArms()
+	query := `
            SELECT id FROM tickets
             WHERE board_id = ?
               AND (lease_holder IS NULL OR lease_expires_at <= ?)
@@ -430,22 +446,38 @@ func (s *SQLiteStore) claimNextStatement() string {
             ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                                    WHEN 'medium'   THEN 2 ELSE 3 END,
                      created_at ASC, id ASC
-            LIMIT 1)
-        RETURNING id, lease_generation, version`
-}
-
-// claimNextArgs binds the parameters of claimNextStatement in declaration
-// order: the SET clause, then the subquery's board and lease-free arm, then the
-// status list and its in_progress arm.
-func (s *SQLiteStore) claimNextArgs(actor models.Actor, boardID string, nowMS int64) []any {
-	_, statusArgs := s.claimStatusArms()
-	args := []any{
-		actor.ID, string(actor.Type), nowMS, nowMS + s.ttlMS, timeText(nowMS),
-		boardID, nowMS,
-	}
+            LIMIT 1
+`
+	args := []any{boardID, nowMS}
 	args = append(args, statusArgs...)
 	args = append(args, nowMS)
-	return args
+	return query, args
+}
+
+// claimNextStatement is C-CLAIM-12's single statement, verbatim: the id is
+// chosen and mutated by the same UPDATE.
+func (s *SQLiteStore) claimNextStatement(actor models.Actor, boardID string, nowMS int64) (string, []any) {
+	selection, selectionArgs := s.claimNextSelection(boardID, nowMS)
+	query := `
+        UPDATE tickets
+           SET status = 'in_progress', lease_holder = ?, lease_holder_type = ?,
+               lease_acquired_at = ?, lease_expires_at = ?,
+               lease_generation = lease_generation + 1, lease_renewals = 0,
+               version = version + 1, updated_at = ?
+         WHERE id = (` + selection + `)
+        RETURNING id, lease_generation, version`
+	args := []any{actor.ID, string(actor.Type), nowMS, nowMS + s.ttlMS, timeText(nowMS)}
+	args = append(args, selectionArgs...)
+	return query, args
+}
+
+// readClaimNextCandidate reads the pre-transition values of the row claim_next
+// is about to claim, with the same predicate and order as the claim statement
+// itself (C-CONV-4 as amended by A1: one read of the target row, inside the
+// write transaction, for the audit payload only).
+func (s *SQLiteStore) readClaimNextCandidate(ctx context.Context, tx *sql.Tx, boardID string, nowMS int64) (ClaimedTicket, bool, error) {
+	selection, args := s.claimNextSelection(boardID, nowMS)
+	return readClaimedTicketWhere(ctx, tx, "WHERE id = ("+selection+")", args, nowMS)
 }
 
 // ---- diagnosis (C-CLAIM-22: first matching row wins) ----------------------
@@ -601,6 +633,13 @@ func diagnoseRelease(req ReleaseRequest, prior ClaimedTicket, found bool) error 
 // readClaimedTicket reads one ticket with its version and lease columns and
 // derives its claim state (contracts.md §2.1: the state is never stored).
 func readClaimedTicket(ctx context.Context, q queryRower, id string, nowMS int64) (ClaimedTicket, bool, error) {
+	return readClaimedTicketWhere(ctx, q, "WHERE id = ?", []any{id}, nowMS)
+}
+
+// readClaimedTicketWhere is readClaimedTicket with the row chosen by the
+// caller's predicate. claim_next uses it to read the pre-transition values of
+// exactly the row its statement will claim (C-CONV-4 as amended by A1).
+func readClaimedTicketWhere(ctx context.Context, q queryRower, where string, args []any, nowMS int64) (ClaimedTicket, bool, error) {
 	var t ClaimedTicket
 	var epicID, resolution sql.NullString
 	var createdAt, updatedAt string
@@ -612,7 +651,7 @@ func readClaimedTicket(ctx context.Context, q queryRower, id string, nowMS int64
                resolution, created_at, updated_at, version,
                lease_holder, lease_holder_type, lease_acquired_at, lease_expires_at,
                lease_generation, lease_renewals
-          FROM tickets WHERE id = ?`, id).
+          FROM tickets `+where, args...).
 		Scan(&t.ID, &t.BoardID, &epicID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.Assignee,
 			&resolution, &createdAt, &updatedAt, &t.Version,
 			&holder, &holderType, &acquiredAt, &expiresAt,

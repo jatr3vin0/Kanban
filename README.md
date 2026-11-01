@@ -404,4 +404,4 @@ Ledgerboard is a fork of [`rgracey/kanban-mcp`](https://github.com/rgracey/kanba
 
 The upstream repository carries **no licence file** (verified 2026-11-01: no `LICENSE`/`COPYING`, GitHub API reports `license: null`). Absent a licence, upstream rights are reserved by its author by default: **all rights in the upstream code remain with that author**.
 
-This fork is shared publicly within GitHub's own forking terms, and nothing here grants any redistribution right — no binaries, packages, re-licensing or other distribution of upstream-derived code is offered. A licence request to the upstream author is outstanding; if permission is granted, this note will be updated.
+This fork is shared publicly within GitHub's own forking terms, and nothing here grants any redistribution right — no binaries, packages, re-licensing or other distribution of upstream-derived code is offered. No licence request has been made to the upstream author and no permission has been granted. If the upstream author objects to this public fork, it will be made private immediately.

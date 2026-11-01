@@ -13,6 +13,7 @@ verbatim output.
 | `db-and-migration.txt` | connection-pragma probe, dirty-migration fail-closed, 0002 up/down round trip on a populated 0001 database |
 | `claims.txt` | claim / claim_next / renew / release store tests |
 | `seams.txt` | crashpoint and clocksource seam tests |
+| `review-fixes.txt` | the architect's FIX-FIRST follow-up: R1/R2/R3 verification, the two new tests, and both negative controls |
 
 ## Results
 

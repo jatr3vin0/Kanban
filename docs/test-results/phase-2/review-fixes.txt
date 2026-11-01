@@ -1,0 +1,132 @@
+# Phase 2 slice 1 — architect review fixes (R1, R2, R3; amendments A1–A4)
+
+Branch: `phase-2/domain-core`, based on `main` @ f0d6c95.
+Reviewed revision: a581aa6. Review: `/home/team/shared/design/phase-2-slice-1-review.md`,
+verdict FIX-FIRST (3 required items, 4 doc amendments).
+Captured: 2026-11-01T20:51:31Z on Linux x86_64, go version go1.25.5 linux/amd64.
+
+## What this run covers
+
+| Item | Change | Where |
+|---|---|---|
+| R1 | Provenance note states the actual licence position (no request made, none granted) | `README.md` |
+| R2 | `ClaimNext` reads the pre-transition row inside the same write transaction; the audit payload reports the real `previous_holder`/`previous_generation` | `internal/store/claim.go` |
+| R3 | Event reads are `ORDER BY created_at ASC, rowid ASC` (C-AUDIT-7) | `internal/store/event.go` |
+| A1 | C-CONV-4 permits one in-transaction pre-read (audit pre-values / diagnosis) | `docs/contracts.md` |
+| A2 | §1.8 `claimed`: `previous_holder` is the real pre-transition holder | `docs/contracts.md` |
+| A3 | §2.7 `claim`: the `expected_version` row; `claim_next` needs no diagnosis block | `docs/contracts.md` |
+| A4 | test-plan §1.3: the fake clock is seeded at real now, never below it | `docs/test-plan.md` |
+
+## 1. Formatting, build, vet
+
+```
+$ gofmt -l .
+(no output above = every file is gofmt-clean)
+
+$ go build ./...
+exit 0 (no output)
+
+$ go vet ./...
+exit 0 (no output)
+```
+
+## 2. Full test suite
+
+```
+$ go test ./... -count=1
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.073s
+?   	github.com/rgracey/kanban-mcp/internal/apperr	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.007s
+ok  	github.com/rgracey/kanban-mcp/internal/config	0.004s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.010s
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.192s
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.073s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.541s
+```
+
+## 3. The two new tests, verbose
+
+```
+$ go test ./internal/store/ -count=1 -v -run 'TestClaimNextAuditPreviousHolder|TestListTicketEventsRowidTiebreak'
+=== RUN   TestClaimNextAuditPreviousHolder
+=== RUN   TestClaimNextAuditPreviousHolder/unclaimed_row_reports_null
+=== RUN   TestClaimNextAuditPreviousHolder/lapsed_takeover_reports_the_lapsed_holder
+--- PASS: TestClaimNextAuditPreviousHolder (0.02s)
+    --- PASS: TestClaimNextAuditPreviousHolder/unclaimed_row_reports_null (0.01s)
+    --- PASS: TestClaimNextAuditPreviousHolder/lapsed_takeover_reports_the_lapsed_holder (0.01s)
+=== RUN   TestListTicketEventsRowidTiebreak
+--- PASS: TestListTicketEventsRowidTiebreak (0.01s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.026s
+```
+
+## 4. Negative controls
+
+### 4.1 R2 — put the old payload back and the new test must fail
+
+Temporarily restores `previous_holder: nil` / `previous_generation: generation - 1`
+in `ClaimNext` only (`Claim` keeps its truthful values), runs the new test, then restores
+the fixed source.
+
+```
+$ go test ./internal/store/ -count=1 -run TestClaimNextAuditPreviousHolder
+--- FAIL: TestClaimNextAuditPreviousHolder (0.02s)
+    --- FAIL: TestClaimNextAuditPreviousHolder/lapsed_takeover_reports_the_lapsed_holder (0.01s)
+        claim_test.go:928: 
+            	Error Trace:	/home/team/shared/ledgerboard/internal/store/claim_test.go:928
+            	Error:      	Not equal: 
+            	            	expected: string("dead-agent")
+            	            	actual  : <nil>(<nil>)
+            	Test:       	TestClaimNextAuditPreviousHolder/lapsed_takeover_reports_the_lapsed_holder
+            	Messages:   	the lapsed holder is the previous holder; null here contradicted previous_generation
+FAIL
+FAIL	github.com/rgracey/kanban-mcp/internal/store	0.019s
+FAIL
+
+(source restored)
+```
+
+### 4.2 R3 — drop the rowid tiebreak and see what the ordering test says
+
+This one does **not** fail, and that is the point worth recording: with
+`ORDER BY created_at ASC` alone SQLite happens to return same-second rows in rowid order
+for this plan, which is exactly the incidental behaviour the review says the suite is
+passing on. The clause makes the order contractual instead of lucky; the test pins the
+contract, it is not a discriminator for the old code.
+
+```
+$ sed -i 's/ORDER BY created_at ASC, rowid ASC/ORDER BY created_at ASC/' internal/store/event.go
+$ go test ./internal/store/ -count=1 -run TestListTicketEventsRowidTiebreak -v
+=== RUN   TestListTicketEventsRowidTiebreak
+--- PASS: TestListTicketEventsRowidTiebreak (0.01s)
+PASS
+ok  	github.com/rgracey/kanban-mcp/internal/store	0.011s
+
+(source restored)
+```
+
+## 5. Tree state at capture time
+
+```
+$ git status --short
+ M README.md
+ M docs/contracts.md
+ M docs/test-plan.md
+ M internal/store/claim.go
+ M internal/store/claim_test.go
+ M internal/store/event.go
+?? docs/test-results/phase-2/review-fixes.txt
+?? internal/store/event_test.go
+
+$ git diff --stat
+ README.md                    |   2 +-
+ docs/contracts.md            |   7 ++-
+ docs/test-plan.md            |   4 ++
+ internal/store/claim.go      | 103 +++++++++++++++++++++++++++++--------------
+ internal/store/claim_test.go |  59 +++++++++++++++++++++++++
+ internal/store/event.go      |   8 +++-
+ 6 files changed, 148 insertions(+), 35 deletions(-)
+```
