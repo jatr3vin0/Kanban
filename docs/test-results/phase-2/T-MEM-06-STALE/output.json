@@ -1,0 +1,15 @@
+{
+  "claim": {
+    "attempts": 1,
+    "claimed": true,
+    "ok": true,
+    "op": "outbox_claim",
+    "outbox_id": "f454fe83a7ba42eda96f7c50847f324b"
+  },
+  "deliver": {
+    "delivered": 1,
+    "elapsed_ms": 1,
+    "ok": true,
+    "op": "outbox_loop"
+  }
+}

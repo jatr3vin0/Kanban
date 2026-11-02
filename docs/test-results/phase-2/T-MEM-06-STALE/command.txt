@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_MEM_06_STALE$' -count=1 -v  (MP: stale worker ack is harmless, C-OUTBOX-7)

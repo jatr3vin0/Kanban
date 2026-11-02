@@ -107,7 +107,7 @@ negative control, that is stated in the row). It speaks the same JSON-lines prot
 |---|---|
 | `sql {stmt, params}` | execute, report `rows_affected` / `last_insert_id` / error code |
 | `tx_begin` · `tx_commit` · `tx_rollback` | hold a write transaction across ops — this is the busy-DB lock holder |
-| `wait_column {table, column}` | poll `PRAGMA table_info` in a tight loop until the column exists (migration watcher, §2.7/T-CRASH-d); polling a local file-backed DB is not a sleep |
+| `wait_column {table, column}` | poll `PRAGMA table_info` in a tight loop until the column exists (migration watcher, §2.7; T-CRASH-d's B1 kill waits on `schema_migrations.dirty` with the same helper — §4.3 as amended by A12); polling a local file-backed DB is not a sleep |
 | `dump {tables}` | write a row-ordered (by `rowid`) JSON dump of the named tables for before/after comparison |
 
 Two `harness-dbproc` processes barrier exactly like agents: both `ready` → both `send_only`-style
@@ -172,9 +172,8 @@ repo owns (claim, handoff, outbox, renew), the server carries an inert **crashpo
 serves a rule: `claim.*` and `renew.*` → `C-CONV-3`/`C-AUDIT-4`/`C-IDEM-12` (one transaction per
 mutation); `handoff.*` → `C-HANDOFF-14`/`C-IDEM-12`; `memory.*` → `C-OUTBOX-2`/`C-OUTBOX-9`.
 Crash boundary (d) — *during migration* — cannot use in-process hooks, because the migration runner
-is vendored `golang-migrate` code; the T-CRASH-d row in §3 specifies the watcher-landmark kill used
-instead (named DDL-statement landmarks observed from a separate `harness-dbproc` watcher, SIGKILL
-from the test at a chosen landmark).
+is vendored `golang-migrate` code; the T-CRASH-d row in §3 specifies the kill used instead (the
+dirty-boundary kill (B1) and constructed dirty state (B2), §4.3 as amended by A12).
 
 ### 1.5 Files, FIFOs and markers — the synchronisation alphabet
 
@@ -369,6 +368,15 @@ rows prove the storage/semantics rules themselves.
 
 ### 2.7 Crash boundaries (a)–(e) — detailed design in §3
 
+> **A13 (test-plan §2.7, T-CLAIM-08(ii), additive).** The row has two MP legs. (a) renew ×
+> holder vs sweep at the expiry boundary: outcomes `200-renew`, `409 lease_expired` or
+> swept-clear, never `500`, post-state satisfies `C-INV-3`/`C-INV-4`. (b) renew vs claim at a
+> **frozen post-expiry clock**: the renew always loses — `409 lease_expired` if it lands
+> first, `409 not_claim_holder` if the claim lands first (`C-CLAIM-18` diagnosis table) — the
+> claim wins with generation `g+1`, exactly one of the two succeeds, and `lease_renewals` is
+> unchanged. A renew that succeeds against a lapsed lease is a failure of `C-CLAIM-14`, not a
+> permitted race.
+
 | ID | Rules | Asserts (one line; §3 carries the full matrix) | Level | Det. | Evidence | Ph |
 |---|---|---|---|---|---|---|
 | T-CRASH-a claim commit boundary | `C-CONV-3`, `C-AUDIT-4`, `C-IDEM-12`, `C-IDEM-13`, `C-CLAIM-10` | kill at `claim.pre_commit` and at `claim.post_commit` (20 iterations each): pre → no claim, no audit, no key row, no SSE, retry with same key succeeds; post → claim + audit + key row all present, retry replays; **never** claim-without-audit (if that ever appears, Phase 2 violated `C-AUDIT-4` and the test fails — this is what makes the owner's boundary (a) meaningful under the contract) | `MP` | crash FIFO; restart on same file | `phase-2/T-CRASH-a/` | 2 |
@@ -425,15 +433,15 @@ distinguish "handles crash" from "handles one lucky crash".
 | a | "after claim row written, before audit/SSE" | `claim.pre_commit` — inside the `BEGIN IMMEDIATE`, after the claim `UPDATE` reports `RowsAffected()==1`, **before `COMMIT`**. (Under `C-AUDIT-4` the audit row is inside the same transaction, so this *is* the last moment a claim can exist without its audit; the complementary `claim.post_commit` is the second point.) | pre-commit: nothing — SQLite rolls the whole transaction back (claim, audit, idempotency key, version bump). post-commit: claim + audit row + idempotency row, committed; the SSE event may be lost (it publishes after commit) — losing the *event* is permitted, losing the *fact* is not | pre-commit: nothing to recover; the retry with the same idempotency key re-executes cleanly and only then does the key row exist (`C-IDEM-13` case a). post-commit: retry replays the stored response byte-identically (`C-IDEM-13` case b) with no second generation bump and no second audit row | `C-CONV-3`, `C-AUDIT-4`, `C-CLAIM-10`, `C-IDEM-12`, `C-IDEM-13`, `C-IDEM-9` | T-CRASH-a |
 | b | "mid-handoff before outbox rows are written" | `handoff.after_handoff_insert` — after the `handoffs` INSERT, before the first outbox INSERT; and `handoff.pre_commit` — after all outbox INSERTs, before `COMMIT` (the complementary window; the contract only knows "all or nothing", so both halves are killed) | nothing: no handoff row, no outbox rows, no `outbox_enqueued` audit, no idempotency key row — one transaction, `C-HANDOFF-14` | the retry with the same key creates handoff + outbox + audit **atomically**; no iteration may leave obligations without a handoff or a handoff without its obligations (`C-IDEM-12` forbids the third state) | `C-HANDOFF-14`, `C-SCHEMA-14`, `C-IDEM-12`, `C-IDEM-13`, `C-AUDIT-4` | T-CRASH-b |
 | c | "after external memory success, before local ack" | `memory.post_adapter_write` — the mock's `Write` returned a non-empty external id, before the `succeeded` UPDATE commits; and `memory.pre_ack_commit` — after the ack UPDATE, before `COMMIT` (same observable state, later window) | the write at the far end — it cannot be rolled back; the outbox row is still `processing` with `attempts` already ≥1 (incremented at claim, §6.2) | the row's 60 s lease lapses (fake clock), the reclaiming worker first marks it `uncertain` (`C-OUTBOX-6`) — never `succeeded` and never silently retried-as-failed — then retries with the **same write id** (`C-IDEM-5`), the far end dedups (mock returns the same external id), and only a **committed** local ack ever produces `succeeded` (`C-OUTBOX-2`). The board never claims a success it cannot prove (`C-OUTBOX-9`); the duplicate is the operator's side's to dedup by id (`C-OUTBOX-8`) | `C-OUTBOX-2`, `C-OUTBOX-3`, `C-OUTBOX-6`, `C-OUTBOX-8`, `C-OUTBOX-9`, `C-IDEM-5`, `C-SCHEMA-14` | T-CRASH-c |
-| d | "during migration" | the DDL landmarks of `0002_lease.up.sql` observed **committed** by a separate `harness-dbproc` watcher (§4.3): after statement k for k ∈ {1, 4, 8, 10, 16, 20} of the 20 contracted statements (8 `ALTER` + 12 `CREATE`); the test SIGKILLs the migrating server at the chosen landmark and records which landmarks were observed | the `0001` data rows — byte-identical across every landmark (column defaults are metadata, not rewrites, `C-SCHEMA-2`); `foreign_key_check` still empty | a **fail-closed** open (`C-SCHEMA-19`): the server **exits non-zero before the listener binds** and never half-serves; recovery is the explicit operator `force`, after which migration completes and the end state is dump-identical to the clean migration of T-MIG-02. A server that starts and serves with missing lease columns is a test failure, not a recovery | `C-SCHEMA-1`, `C-SCHEMA-2`, `C-SCHEMA-3`, `C-COMPAT-4`, `C-SCHEMA-19` | T-CRASH-d |
+| d | "during migration" | the dirty boundary (B1) as a kill, and the DDL-complete-with-dirty state (B2) constructed by setting `dirty=1` on a clean-migrated copy (§4.3 as amended by A12 — the vendored runner tx-wraps the file, so no per-statement DDL landmark is observable); the test records which boundary was reached | the `0001` data rows — byte-identical across every landmark (column defaults are metadata, not rewrites, `C-SCHEMA-2`); `foreign_key_check` still empty | a **fail-closed** open (`C-SCHEMA-19`): the server **exits non-zero before the listener binds** and never half-serves; recovery is the explicit operator `force`, after which migration completes and the end state is dump-identical to the clean migration of T-MIG-02. A server that starts and serves with missing lease columns is a test failure, not a recovery | `C-SCHEMA-1`, `C-SCHEMA-2`, `C-SCHEMA-3`, `C-COMPAT-4`, `C-SCHEMA-19` | T-CRASH-d |
 | e | "while a lease is being renewed" | `renew.pre_commit` — after the renew `UPDATE`, before `COMMIT`; and `renew.post_commit` | pre-commit: nothing — the lease keeps its **original** expiry, generation and renewals (the renewal never happened); post-commit: the extension and the `claim_renewed` audit row, committed together | pre-commit: the same holder+generation can renew again within the original window (`C-CLAIM-14`'s liveness guard is evaluated against real committed state, so the retry succeeds iff the lease is still live); post-commit: state is simply the renewed state; a later holder change still invalidates normally | `C-CONV-3`, `C-AUDIT-4`, `C-INV-2`, `C-CLAIM-14`, `C-FENCE-10` | T-CRASH-e |
 
 Two boundaries deserve their honesty note in the open: **(a)** — as the owner phrased it the boundary
 is only reachable if an implementation writes the audit row *after* commit, which `C-AUDIT-4`
 forbids; the test therefore both (i) proves the transaction boundary SQLite gives us, and (ii) fails
 loudly if Phase 2 ever moves the audit write out of the transaction. **(d)** — the migration runner
-is vendored code and cannot host hooks; the watcher-landmark construction (§4.3) names the steps by
-*observed committed DDL*, which is the step boundary that actually exists at the storage engine.
+is vendored code and cannot host hooks; it tx-wraps the whole migration file in one transaction, so
+the observable boundary is the dirty window, not DDL steps (§4.3 as amended by A12).
 
 ---
 
@@ -482,22 +490,38 @@ version=2; `sqlite_master` diff vs allowlist (`C-SCHEMA-1`); all `0001` tables d
 including fetching a pre-migration ticket by original id and walking a pre-migration relation both
 ways; five open/migrate cycles change nothing further (T-MIG-06).
 
-### 4.3 Crash during migration (T-CRASH-d)
+### 4.3 Crash during migration (T-CRASH-d) — amended by A12: B1 kill / B2 construct
 
-The migrating server is started against a *copy* of the fixture. A separate `harness-dbproc` watcher
-loops `PRAGMA table_info(tickets)` (tight loop, no sleep) until the `k`-th contracted statement's
-effect is visible (`version` column for k=1; `handoff_id` for k=8; the `handoffs` table for k=11;
-`outbox` for k=14; `idempotency_keys` for k=19), then the controller SIGKILLs the server. The numbering
-is the statement order of contracts §1.2–§1.6: k=1–8 the eight `ALTER`s, k=9–10 the two ticket
-indexes, k=11–13 the `handoffs` table and its two indexes, k=14–18 the `outbox` table and its four
-indexes, k=19–20 `idempotency_keys` and its index — exactly the 20 statements the bound below counts. Landmarks
-are per-statement because each DDL statement commits individually; the loop re-runs a landmark if the
-server raced past it before the kill landed, bounded by the 20-statement count — determinism comes
-from *which* landmark was reached (recorded), and every reached landmark asserts the same recovery
-contract. On restart: open must fail closed on the dirty version (`C-SCHEMA-19`: server exits non-zero with one line naming the version and the recovery command, **before binding a listener**; a probe HTTP call is refused). After the explicit operator
+The migrating server is started against a *copy* of the fixture. The runner is vendored
+golang-migrate v4.19.1 (`database/sqlite/sqlite.go`: `Run` → `executeQuery`): unless `NoTxWrap` is
+set it tx-wraps the ENTIRE migration file in one `Begin`/`Exec`/`Commit`, and SQLite DDL is
+transactional — so no per-statement committed state exists for a watcher to observe (empirical: the
+watcher sees all landmarks in one observation, `T-CRASH-d/landmarks.json`). The two boundaries that
+DO exist are both verified:
+
+- **B1 — the dirty boundary, as a kill (the row's only kill point).** A separate `harness-dbproc`
+  watcher polls `schema_migrations` in a tight loop (no sleep) until `dirty=1` is visible — the
+  migration transaction is open — and the controller SIGKILLs the migrating server at that
+  observation.
+- **B2 — the DDL-complete-with-dirty state, CONSTRUCTED.** The window between the migration
+  transaction's commit and the runner writing `version=2, dirty=0` is microseconds inside one
+  process; an external poller cannot hit it reliably (a test that hits it 1 time in 20 is a flake
+  generator), so it is not killed — it is built: a clean-migrated copy of the fixture gets
+  `schema_migrations.dirty = 1` by direct SQL through `harness-dbproc`, and the identical contract
+  below is asserted against it.
+
+The recovery contract is unchanged and applies at each boundary; the `force` target is
+boundary-dependent: **B1 → `force 1`** (`0002` has not applied — `force 2` there would leave the
+file un-migrated), **B2 → `force 2`** (the DDL is already on disk — `force 1` there would re-run an
+applied file and fail on `duplicate column name`). On restart: open must fail closed on the dirty version (`C-SCHEMA-19`: server exits non-zero with one line naming the version and the recovery command, **before binding a listener**; a probe HTTP call is refused). After the explicit operator
 `force` (documented command), migration completes; the final `sqlite_master` and data dumps must be
 **identical** to T-MIG-02's clean-migration result, and `foreign_key_check` is empty. What may never
 happen: a server that starts and serves requests against a partially-migrated file.
+
+Deferred, recorded not dropped (the A12 acceptance condition): per-statement landmarks return if
+a per-statement-committing runner is adopted (`NoTxWrap`), and are not currently constructible.
+The 20-statement count of `0002_lease.up.sql` remains the falsifiability bound for the
+throwaway-copy counterfactual.
 
 ### 4.4 Down-migration round trip (T-MIG-04)
 

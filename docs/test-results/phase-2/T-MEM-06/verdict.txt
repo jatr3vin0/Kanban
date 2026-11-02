@@ -1,0 +1,1 @@
+T-MEM-06 PASS (MP): killed worker A mid-attempt -> processing -> clock past 60s -> worker B reclaims to uncertain FIRST (no external id) -> delivers with the same write id; far end deduped

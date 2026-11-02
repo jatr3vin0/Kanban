@@ -1,0 +1,23 @@
+[
+  {
+    "details": {
+      "current_generation": 1,
+      "lease_expires_at": 1793593579915,
+      "ticket_id": "4cbc07caae164ae7b01cec7ace888502"
+    },
+    "err_message": "the lease on ticket 4cbc07caae164ae7b01cec7ace888502 lapsed; re-claim it instead of renewing",
+    "error_code": "lease_expired",
+    "ok": false,
+    "op": "renew"
+  },
+  {
+    "elapsed_ms": 4,
+    "generation": 2,
+    "holder": "new-claimant",
+    "lease_expires_at_ms": 1793594539915,
+    "ok": true,
+    "op": "claim",
+    "ticket_id": "4cbc07caae164ae7b01cec7ace888502",
+    "version": 3
+  }
+]

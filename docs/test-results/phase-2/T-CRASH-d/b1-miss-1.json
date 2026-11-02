@@ -1,0 +1,13 @@
+{
+  "err": "landmark dirty:version not seen within 5000ms; saw [tickets.handoff_id table.handoffs table.outbox table.idempotency_keys tickets.version]",
+  "ok": false,
+  "op": "wait_schema",
+  "saw_landmarks": [
+    "tickets.handoff_id",
+    "table.handoffs",
+    "table.outbox",
+    "table.idempotency_keys",
+    "tickets.version"
+  ],
+  "waited_ms": 5001
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "attempts": 1,
+    "claimed": true,
+    "ok": true,
+    "op": "outbox_claim",
+    "outbox_id": "3b115a44c6734593acebfca996f4392b"
+  },
+  {
+    "elapsed_ms": 1,
+    "ok": true,
+    "op": "outbox_claim"
+  }
+]

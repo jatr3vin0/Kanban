@@ -1,0 +1,1 @@
+T-HAND-09 PASS (MP, full row): external SIGKILL post-commit; handoff+3 outbox rows+audits+key durable; second process delivered the backlog in (created_at,id) order

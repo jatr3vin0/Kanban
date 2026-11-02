@@ -1,0 +1,10 @@
+{
+  "dirty": false,
+  "note": "concurrent starts serialized to a clean migration",
+  "outcomes": [
+    {},
+    {},
+    {}
+  ],
+  "version": 2
+}

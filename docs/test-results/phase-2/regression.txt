@@ -1,0 +1,14 @@
+?   	github.com/rgracey/kanban-mcp	[no test files]
+?   	github.com/rgracey/kanban-mcp/frontend	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/api	0.062s
+?   	github.com/rgracey/kanban-mcp/internal/apperr	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/clocksource	0.009s
+ok  	github.com/rgracey/kanban-mcp/internal/config	0.004s
+ok  	github.com/rgracey/kanban-mcp/internal/crashpoint	0.012s
+ok  	github.com/rgracey/kanban-mcp/internal/db	0.192s
+?   	github.com/rgracey/kanban-mcp/internal/harness/agent	[no test files]
+?   	github.com/rgracey/kanban-mcp/internal/harness/dbproc	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/mcp	0.075s
+ok  	github.com/rgracey/kanban-mcp/internal/memory	0.004s
+?   	github.com/rgracey/kanban-mcp/internal/models	[no test files]
+ok  	github.com/rgracey/kanban-mcp/internal/store	1.644s

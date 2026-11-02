@@ -1,0 +1,1 @@
+CONTRACTED DATA LOSS: the down migration destroys lease, handoff, outbox and idempotency rows by design (C-SCHEMA-4). It is never invoked automatically; here it is executed explicitly, by its exact contracted text.

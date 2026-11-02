@@ -1,0 +1,1 @@
+T-CRASH-b PASS (MP): after_handoff_insert and pre_commit leave nothing across 20x each; the unarmed control shows the committed shape; retries recreate handoff+outbox+audits+key atomically

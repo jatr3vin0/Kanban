@@ -1,0 +1,57 @@
+=== RUN   TestMP_T_CLAIM_01
+--- PASS: TestMP_T_CLAIM_01 (0.56s)
+=== RUN   TestMP_T_CLAIM_16
+=== RUN   TestMP_T_CLAIM_16/absorb_within_busy_timeout
+=== RUN   TestMP_T_CLAIM_16/exceed_yields_database_busy
+=== RUN   TestMP_T_CLAIM_16/negative_control_4x10_burst
+--- PASS: TestMP_T_CLAIM_16 (7.41s)
+    --- PASS: TestMP_T_CLAIM_16/absorb_within_busy_timeout (1.24s)
+    --- PASS: TestMP_T_CLAIM_16/exceed_yields_database_busy (6.01s)
+    --- PASS: TestMP_T_CLAIM_16/negative_control_4x10_burst (0.01s)
+=== RUN   TestMP_T_CLAIM_08_EXPIRY_RACE
+--- PASS: TestMP_T_CLAIM_08_EXPIRY_RACE (0.02s)
+=== RUN   TestMP_T_FENCING
+--- PASS: TestMP_T_FENCING (0.03s)
+=== RUN   TestMP_T_CRASH_A
+--- PASS: TestMP_T_CRASH_A (0.64s)
+=== RUN   TestMP_T_CRASH_B
+--- PASS: TestMP_T_CRASH_B (0.88s)
+=== RUN   TestMP_T_CRASH_E
+--- PASS: TestMP_T_CRASH_E (0.50s)
+=== RUN   TestMP_T_FALSIFIABLE
+--- PASS: TestMP_T_FALSIFIABLE (0.00s)
+=== RUN   TestMP_T_HAND_09
+--- PASS: TestMP_T_HAND_09 (0.02s)
+=== RUN   TestMP_T_MIG_01
+--- PASS: TestMP_T_MIG_01 (0.20s)
+=== RUN   TestMP_T_MIG_02
+--- PASS: TestMP_T_MIG_02 (30.40s)
+=== RUN   TestMP_T_MIG_04
+--- PASS: TestMP_T_MIG_04 (0.38s)
+=== RUN   TestMP_T_MIG_05
+    migration_mp_test.go:754: 
+        	Error Trace:	/home/team/shared/ledgerboard/internal/mptest/migration_mp_test.go:754
+        	Error:      	Should be true
+        	Test:       	TestMP_T_MIG_05
+        	Messages:   	upstream failed on the migrated DB:
+        	            	{"time":"2026-11-02T04:11:53.436721056Z","level":"INFO","msg":"starting kanban-mcp","version":"dev"}
+        	            	{"time":"2026-11-02T04:11:53.438304474Z","level":"ERROR","msg":"failed to open database","error":"failed to run migrations: no migration found for version 2: read down for version 2 migrations: file does not exist"}
+        	            	{"time":"2026-11-02T04:11:53.438315055Z","level":"INFO","msg":"failed to run migrations: no migration found for version 2: read down for version 2 migrations: file does not exist"}
+--- FAIL: TestMP_T_MIG_05 (0.48s)
+=== RUN   TestMP_T_MIG_06
+--- PASS: TestMP_T_MIG_06 (0.43s)
+=== RUN   TestMP_T_CRASH_D
+--- PASS: TestMP_T_CRASH_D (0.43s)
+=== RUN   TestMP_T_MEM_01
+--- PASS: TestMP_T_MEM_01 (0.03s)
+=== RUN   TestMP_T_MEM_01_CLAIM_RACE
+--- PASS: TestMP_T_MEM_01_CLAIM_RACE (0.02s)
+=== RUN   TestMP_T_MEM_06
+--- PASS: TestMP_T_MEM_06 (0.02s)
+=== RUN   TestMP_T_CRASH_C
+--- PASS: TestMP_T_CRASH_C (0.05s)
+=== RUN   TestMP_T_MEM_06_STALE
+--- PASS: TestMP_T_MEM_06_STALE (0.02s)
+FAIL
+FAIL	github.com/rgracey/kanban-mcp/internal/mptest	42.506s
+FAIL

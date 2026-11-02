@@ -1,0 +1,100 @@
+{
+  "memory.post_adapter_write": {
+    "attempts": 2,
+    "calls": [
+      {
+        "actor": "agent:builder-1",
+        "actor_type": "agent",
+        "confidence": 0.75,
+        "content": "write 0 from builder-1",
+        "created_at": "2026-11-02T04:11:54.384Z",
+        "external_id": "mem_d648b78068ae4320b9e460532704c40e",
+        "handoff_id": "17ab1efde9934cef8e557562afecc41d",
+        "id": "d648b78068ae4320b9e460532704c40e",
+        "op": "write",
+        "outcome": "ok",
+        "seq": 1,
+        "tags": [],
+        "ticket_id": "d5b9511116074ff2a5b13a44b7708c3e",
+        "type": "fact"
+      },
+      {
+        "actor": "agent:builder-1",
+        "actor_type": "agent",
+        "confidence": 0.75,
+        "content": "write 0 from builder-1",
+        "created_at": "2026-11-02T04:11:54.384Z",
+        "external_id": "mem_d648b78068ae4320b9e460532704c40e",
+        "handoff_id": "17ab1efde9934cef8e557562afecc41d",
+        "id": "d648b78068ae4320b9e460532704c40e",
+        "op": "write",
+        "outcome": "ok",
+        "seq": 1,
+        "tags": [],
+        "ticket_id": "d5b9511116074ff2a5b13a44b7708c3e",
+        "type": "fact"
+      }
+    ],
+    "crash": "crash memory.post_adapter_write 1\n",
+    "deliver": {
+      "delivered": 1,
+      "elapsed_ms": 1,
+      "ok": true,
+      "op": "outbox_loop"
+    },
+    "reclaim": {
+      "ok": true,
+      "op": "outbox_reclaim",
+      "reclaimed": 1
+    }
+  },
+  "memory.pre_ack_commit": {
+    "attempts": 2,
+    "calls": [
+      {
+        "actor": "agent:builder-1",
+        "actor_type": "agent",
+        "confidence": 0.75,
+        "content": "write 0 from builder-1",
+        "created_at": "2026-11-02T04:11:54.407Z",
+        "external_id": "mem_92be045185e3477d8076b78dd37bfcf2",
+        "handoff_id": "057353747ddf4ef5ac9b94c7fa529881",
+        "id": "92be045185e3477d8076b78dd37bfcf2",
+        "op": "write",
+        "outcome": "ok",
+        "seq": 1,
+        "tags": [],
+        "ticket_id": "833969bed75944efa8a15204d4e4d4f6",
+        "type": "fact"
+      },
+      {
+        "actor": "agent:builder-1",
+        "actor_type": "agent",
+        "confidence": 0.75,
+        "content": "write 0 from builder-1",
+        "created_at": "2026-11-02T04:11:54.407Z",
+        "external_id": "mem_92be045185e3477d8076b78dd37bfcf2",
+        "handoff_id": "057353747ddf4ef5ac9b94c7fa529881",
+        "id": "92be045185e3477d8076b78dd37bfcf2",
+        "op": "write",
+        "outcome": "ok",
+        "seq": 1,
+        "tags": [],
+        "ticket_id": "833969bed75944efa8a15204d4e4d4f6",
+        "type": "fact"
+      }
+    ],
+    "crash": "crash memory.pre_ack_commit 1\n",
+    "deliver": {
+      "delivered": 1,
+      "elapsed_ms": 1,
+      "ok": true,
+      "op": "outbox_loop"
+    },
+    "reclaim": {
+      "ok": true,
+      "op": "outbox_reclaim",
+      "reclaimed": 1
+    }
+  }
+}

@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_CLAIM_08_EXPIRY_RACE$' -count=1 -v  (MP leg: lapsed-holder renew vs new claimant, separate processes)

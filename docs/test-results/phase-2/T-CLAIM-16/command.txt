@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_CLAIM_16$' -count=1 -v  (MP: harness-dbproc lock holder + harness-agent claimant + 4x10 burst)

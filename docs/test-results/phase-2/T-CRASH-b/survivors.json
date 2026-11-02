@@ -1,0 +1,428 @@
+{
+  "handoff.after_handoff_insert": [
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    }
+  ],
+  "handoff.pre_commit": [
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    },
+    {
+      "handoff_created": 0,
+      "handoffs": 0,
+      "keys": 0,
+      "outbox": 0,
+      "outbox_enqueued": 0
+    }
+  ],
+  "unarmed": [
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    },
+    {
+      "handoff_created": 1,
+      "handoffs": 1,
+      "keys": 1,
+      "outbox": 3,
+      "outbox_enqueued": 1
+    }
+  ]
+}

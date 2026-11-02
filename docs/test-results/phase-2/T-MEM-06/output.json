@@ -1,0 +1,51 @@
+{
+  "calls": [
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 0 from builder-1",
+      "created_at": "2026-11-02T04:11:54.360Z",
+      "external_id": "mem_263224f6d8d7413d9a8b67d6cc073549",
+      "handoff_id": "7bb567b1db2c4fe981c97a49227dcd38",
+      "id": "263224f6d8d7413d9a8b67d6cc073549",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 1,
+      "tags": [],
+      "ticket_id": "3171d2927fe74be28b1e0ad0150056aa",
+      "type": "fact"
+    },
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 0 from builder-1",
+      "created_at": "2026-11-02T04:11:54.360Z",
+      "external_id": "mem_263224f6d8d7413d9a8b67d6cc073549",
+      "handoff_id": "7bb567b1db2c4fe981c97a49227dcd38",
+      "id": "263224f6d8d7413d9a8b67d6cc073549",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 1,
+      "tags": [],
+      "ticket_id": "3171d2927fe74be28b1e0ad0150056aa",
+      "type": "fact"
+    }
+  ],
+  "crash_marker": "crash memory.post_adapter_write 1\n",
+  "lease_owners": [
+    "\u003cunclaimed\u003e"
+  ],
+  "reclaim": {
+    "ok": true,
+    "op": "outbox_reclaim",
+    "reclaimed": 1
+  },
+  "worker_b": {
+    "delivered": 1,
+    "elapsed_ms": 1,
+    "ok": true,
+    "op": "outbox_loop"
+  }
+}

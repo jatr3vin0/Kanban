@@ -1,0 +1,7 @@
+=== RUN   TestMP_T_CRASH_D
+    migration_mp_test.go:910: 
+        	Error Trace:	/home/team/shared/ledgerboard/internal/mptest/migration_mp_test.go:910
+        	Error:      	An error is expected but got nil.
+        	Test:       	TestMP_T_CRASH_D
+        	Messages:   	no listener: a probe call is refused
+--- FAIL: TestMP_T_CRASH_D (0.47s)

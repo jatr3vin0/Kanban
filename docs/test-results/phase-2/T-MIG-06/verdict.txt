@@ -1,0 +1,1 @@
+T-MIG-06 PASS: five opens, bookkeeping stays 2/non-dirty, data stable across all five

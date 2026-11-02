@@ -1,0 +1,23 @@
+{
+  "b1_dirty_boundary_kill": {
+    "dirty_after": false,
+    "fail_closed_exit": 1,
+    "force": 1,
+    "version_after": 2,
+    "watcher": {
+      "ok": true,
+      "op": "wait_schema",
+      "saw_landmarks": [
+        "dirty"
+      ],
+      "waited_ms": 7
+    }
+  },
+  "b2_constructed_state": {
+    "dirty_after": false,
+    "fail_closed_exit": 1,
+    "force": 2,
+    "version_after": 2
+  },
+  "boundary_rule": "B1 is the row's only kill point; B2 is a constructed state (dirty=1 on a clean-migrated copy). B1 recovers by force 1, B2 by force 2."
+}

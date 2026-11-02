@@ -1,0 +1,1 @@
+T-CRASH-e PASS (MP): pre-commit leaves the original lease (retry renews in-window); post-commit leaves extension+audit together

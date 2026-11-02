@@ -1,0 +1,1 @@
+C-OUTBOX-7 MP PASS: only the lease-holding worker's ack lands (the row's WHERE lease_owner guard decides); the winning ack clears the lease with the status and writes the external id — succeeded row: lease_owner NULL, one audit

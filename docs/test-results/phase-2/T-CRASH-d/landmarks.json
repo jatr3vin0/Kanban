@@ -1,0 +1,7 @@
+{
+  "b1_attempts": 1,
+  "note": "A12 finding (accepted): the landmarks appear together in one observation — the vendored driver commits the whole migration file as ONE transaction, so per-statement landmarks (k=1..20) are not observable. The observable boundaries are the dirty window (B1, killed here) and DDL-complete-with-dirty (B2, constructed below); §4.3 was amended accordingly. b1_attempts records how many watch attempts the dirty window needed (the watcher attaches before the server starts; a miss means the window was missed under scheduling pressure, not that it does not exist).",
+  "saw_landmarks": [
+    "dirty"
+  ]
+}

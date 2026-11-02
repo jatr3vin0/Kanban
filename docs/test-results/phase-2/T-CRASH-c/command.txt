@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_CRASH_C$' -count=1 -v  (MP: recovery matrix over both memory crashpoints)
