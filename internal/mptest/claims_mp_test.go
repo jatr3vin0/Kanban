@@ -38,7 +38,7 @@ func TestMP_T_CLAIM_01(t *testing.T) {
 	const n = 8
 	agents := make([]*barrierAgent, n)
 	for i := 0; i < n; i++ {
-		env := append(agentBase(), claimEnv(dbPath, tk, fmt.Sprintf("agent:claimant-%d", i))...)
+		env := append(agentBase(clockFile), claimEnv(dbPath, tk, fmt.Sprintf("agent:claimant-%d", i))...)
 		agents[i] = startBarrier(t, agentBin, dir, env)
 	}
 	waitReady(t, agents)
@@ -81,7 +81,7 @@ func TestMP_T_CLAIM_01(t *testing.T) {
 		"generation": pdb.Str(t, `SELECT lease_generation FROM tickets WHERE id=?`, tk),
 		"holder":     pdb.Str(t, `SELECT lease_holder FROM tickets WHERE id=?`, tk),
 	}))
-	EvidenceNote(t, ev, "verdict.txt", "T-CLAIM-01 PASS (MP): 8 processes, exactly 1 winner, 7 already_claimed with C-ERR-4 details, 1 audit row\n")
+	VerdictNote(t, ev, "T-CLAIM-01 PASS (MP): 8 processes, exactly 1 winner, 7 already_claimed with C-ERR-4 details, 1 audit row\n")
 }
 
 func winnerOrSkip(results []map[string]any) map[string]any {
@@ -118,7 +118,7 @@ func TestMP_T_CLAIM_16(t *testing.T) {
 		locked := holder.Line(t, 30*time.Second)
 		require.Equal(t, true, locked["locked"], "holder must report the open write lock")
 
-		claimant := StartAgent(t, agentBin, append(agentBase(), claimEnv(dbPath, tk, "agent:busy-claimant")...)...)
+		claimant := StartAgent(t, agentBin, append(agentBase(clockFile), claimEnv(dbPath, tk, "agent:busy-claimant")...)...)
 		res := claimant.Line(t, 30*time.Second)
 		_, _ = holder.Wait(t)
 		assert.True(t, okOf(res), "claim must succeed after the holder commits: %v", res)
@@ -138,7 +138,7 @@ func TestMP_T_CLAIM_16(t *testing.T) {
 		locked := holder.Line(t, 30*time.Second)
 		require.Equal(t, true, locked["locked"])
 
-		claimant := StartAgent(t, agentBin, append(agentBase(), claimEnv(dbPath, tk, "agent:busy-claimant-2")...)...)
+		claimant := StartAgent(t, agentBin, append(agentBase(clockFile), claimEnv(dbPath, tk, "agent:busy-claimant-2")...)...)
 		res := claimant.Line(t, 30*time.Second)
 		_, _ = holder.Wait(t)
 		assert.False(t, okOf(res), "a claim past busy_timeout must not silently succeed")
@@ -174,7 +174,7 @@ func TestMP_T_CLAIM_16(t *testing.T) {
 		assert.Equal(t, 4, okCount, "40/40 writes must succeed under the contract DSN (recon §4.5 measured 17/40 lost upstream)")
 		SaveEvidence(t, ev, "burst.json", DumpJSON(map[string]any{"processes_ok": okCount, "writes_each": 10, "results": transcripts}))
 	})
-	EvidenceNote(t, ev, "verdict.txt", "T-CLAIM-16 PASS (MP): busy_timeout absorbs a short hold; a >5s hold yields database_busy with an exact timing window; 4x10 burst is 40/40\n")
+	VerdictNote(t, ev, "T-CLAIM-16 PASS (MP): busy_timeout absorbs a short hold; a >5s hold yields database_busy with an exact timing window; 4x10 burst is 40/40\n")
 }
 
 // TestMP_T_CLAIM_08_EXPIRY_RACE is the MP leg of T-CLAIM-08(ii): a lapsed
@@ -199,14 +199,17 @@ func TestMP_T_CLAIM_08_EXPIRY_RACE(t *testing.T) {
 	// Advance the shared clock past the lease expiry: relabelled, not waited.
 	WriteClockMS(t, clockFile, base+DefaultLeaseTTL()+60000)
 
-	renewer := startBarrier(t, agentBin, dir, append(agentBase(), []string{
+	// Both children get the fake clock from agentBase(clockFile) — the renewer
+	// must resolve now_ms from the SAME file the store that wrote the lease
+	// uses (review §2.2: the run-4 flake was two processes on two clocks; the
+	// lapsed lease is lapsed for every participant, so C-CLAIM-14 decides).
+	renewer := startBarrier(t, agentBin, dir, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=renew", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:lapsed-holder",
 		fmt.Sprintf("LEDGERBOARD_TEST_GEN=%d", ct.Claim.Generation),
 	}...))
-	claimer := startBarrier(t, agentBin, dir, append(agentBase(), append(
-		claimEnv(dbPath, tk, "agent:new-claimant"),
-		"LEDGERBOARD_CLOCK=fake", "LEDGERBOARD_CLOCK_FILE="+clockFile)...))
+	claimer := startBarrier(t, agentBin, dir, append(agentBase(clockFile),
+		claimEnv(dbPath, tk, "agent:new-claimant")...))
 	waitReady(t, []*barrierAgent{renewer, claimer})
 	releaseBarrier(t, []*barrierAgent{renewer, claimer})
 	results := collect(t, []*Child{renewer.child, claimer.child}, 60*time.Second)
@@ -222,7 +225,7 @@ func TestMP_T_CLAIM_08_EXPIRY_RACE(t *testing.T) {
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='new-claimant' AND lease_generation=2 AND status='in_progress'`, tk), "lease_holder stores the bare actor id (claimStatement binds req.Actor.ID; the type lives in lease_holder_type)")
 	assert.Equal(t, int64(0), pdb.Int(t, `SELECT lease_renewals FROM tickets WHERE id=?`, tk), "the failed renew must not have written")
 	SaveEvidence(t, ev, "output.json", DumpJSON(results))
-	EvidenceNote(t, ev, "verdict.txt", "T-CLAIM-08(ii) MP PASS: lapsed renew loses with a diagnosis, claim wins, generation 1->2, invariants hold\n")
+	VerdictNote(t, ev, "T-CLAIM-08(ii) MP PASS: lapsed renew loses with a diagnosis, claim wins, generation 1->2, invariants hold\n")
 }
 
 // TestMP_T_FENCING is the multi-process fencing row: a superseded generation
@@ -243,7 +246,7 @@ func TestMP_T_FENCING(t *testing.T) {
 	require.EqualValues(t, 1, ct.Claim.Generation)
 
 	run := func(env []string) map[string]any {
-		c := StartAgent(t, agentBin, append(agentBase(), env...)...)
+		c := StartAgent(t, agentBin, append(agentBase(clockFile), env...)...)
 		res := c.Line(t, 30*time.Second)
 		_, _ = c.Wait(t)
 		return res
@@ -273,5 +276,5 @@ func TestMP_T_FENCING(t *testing.T) {
 	pdb := ParentDB(t, dbPath)
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='builder-1' AND lease_generation=3`, tk), "lease_holder stores the bare actor id; holder_type is the separate column")
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"release": rel, "reclaim": recl, "stale_renew": stale, "foreign_claim": foreign}))
-	EvidenceNote(t, ev, "verdict.txt", "FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details\n")
+	VerdictNote(t, ev, "FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details\n")
 }

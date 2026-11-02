@@ -33,7 +33,7 @@ func TestMP_T_HAND_09(t *testing.T) {
 
 	// The creator child: one handoff with 3 memory writes, published, then
 	// blocked forever. The controller (this test process) kills it.
-	creator := startBarrier(t, agentBin, dir, append(agentBase(), []string{
+	creator := startBarrier(t, agentBin, dir, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=handoff_create_signal", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 		"LEDGERBOARD_TEST_KEY=h9",
@@ -75,7 +75,7 @@ func TestMP_T_HAND_09(t *testing.T) {
 	// delivers the backlog in the contract's order (created_at, id — the
 	// three rows share one created_at because one transaction wrote them, so
 	// the id tiebreak orders them; both are the contract's ORDER BY).
-	worker := StartAgent(t, agentBin, append(agentBase(), []string{
+	worker := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_loop", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=worker-restart", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...)...)
@@ -97,5 +97,5 @@ func TestMP_T_HAND_09(t *testing.T) {
 	}
 	assert.Equal(t, order, delivered, "backlog drains in created_at(, id) order (C-OUTBOX-16)")
 	SaveEvidence(t, ev, "delivery.json", DumpJSON(map[string]any{"worker": wres, "calls": callLines, "contract_order": order, "delivered": delivered}))
-	EvidenceNote(t, ev, "verdict.txt", "T-HAND-09 PASS (MP, full row): external SIGKILL post-commit; handoff+3 outbox rows+audits+key durable; second process delivered the backlog in (created_at,id) order\n")
+	VerdictNote(t, ev, "T-HAND-09 PASS (MP, full row): external SIGKILL post-commit; handoff+3 outbox rows+audits+key durable; second process delivered the backlog in (created_at,id) order\n")
 }

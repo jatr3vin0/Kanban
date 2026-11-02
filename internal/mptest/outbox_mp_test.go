@@ -1,6 +1,7 @@
 // Memory/outbox, multi-process (docs/test-plan.md §2.5 + T-CRASH-c): two real
-// worker processes on one SQLite file (C-OUTBOX-5, C-OUTBOX-17), the stuck-
-// worker recovery of T-MEM-06 with a genuine second worker, and the full
+// worker processes on one SQLite file (C-OUTBOX-17 primary — claim atomicity;
+// C-OUTBOX-5 supporting — second-process safety and the 60 s reclaim), the
+// stuck-worker recovery of T-MEM-06 with a genuine second worker, and the full
 // outbox recovery matrix of T-CRASH-c including at-least-once dedup
 // (C-OUTBOX-8 / C-IDEM-5).
 //
@@ -29,7 +30,7 @@ func enqueuedHandoff(t *testing.T, agentBin, dir, dbPath, clockFile string, n in
 	_, tk := fixtureBoard(t, s, "outbox producer")
 	ct, err := s.Claim(t.Context(), modelsClaimReq(tk, "agent:builder-1"))
 	require.NoError(t, err)
-	agent := StartAgent(t, agentBin, append(agentBase(), []string{
+	agent := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=handoff_create", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 		"LEDGERBOARD_TEST_KEY=hk-" + fmt.Sprint(fifoSeq.Add(1)),
@@ -65,11 +66,11 @@ func TestMP_T_MEM_01(t *testing.T) {
 	enqueuedHandoff(t, agentBin, dir, dbPath, clockFile, 6)
 	require.Len(t, outboxStatuses(t, dbPath), 6, "6 outbox rows must be enqueued")
 
-	w1 := StartAgent(t, agentBin, append(agentBase(), []string{
+	w1 := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_loop", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=worker-a", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...)...)
-	w2 := StartAgent(t, agentBin, append(agentBase(), []string{
+	w2 := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_loop", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=worker-b", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...)...)
@@ -99,7 +100,7 @@ func TestMP_T_MEM_01(t *testing.T) {
 	}
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"worker_a": r1, "worker_b": r2, "calls": callLines,
 		"lease_owners": pdb.strs(t, `SELECT DISTINCT COALESCE(lease_owner,'<unclaimed>') FROM outbox`)}))
-	EvidenceNote(t, ev, "verdict.txt", "T-MEM-01 PASS (MP): 2 worker processes drained 6 rows, exactly-once, attempts=1, 6 audits, no double delivery\n")
+	VerdictNote(t, ev, "T-MEM-01 PASS (MP): 2 worker processes drained 6 rows, exactly-once, attempts=1, 6 audits, no double delivery\n")
 }
 
 // readCalls parses the mock adapter's calls.jsonl.
@@ -122,9 +123,10 @@ func readCalls(t *testing.T, path string) []map[string]any {
 	return out
 }
 
-// TestMP_T_MEM_01_CLAIM_RACE is the direct C-OUTBOX-5 leg: one due row, two
-// worker processes released together — exactly one claims it, the other finds
-// nothing.
+// TestMP_T_MEM_01_CLAIM_RACE is the direct C-OUTBOX-17 leg (claim atomicity:
+// exactly one goroutine loop per process claims one row at a time; a second
+// process is safe — C-OUTBOX-5): one due row, two worker processes released
+// together — exactly one claims it, the other finds nothing.
 func TestMP_T_MEM_01_CLAIM_RACE(t *testing.T) {
 	dir := TestDir(t, "T-MEM-01-CLAIMRACE")
 	ev := EvidenceDir(t, "T-MEM-01-CLAIMRACE", "go test ./internal/mptest -run '^TestMP_T_MEM_01_CLAIM_RACE$' -count=1 -v  (MP: one due row, two claimant processes)")
@@ -134,32 +136,38 @@ func TestMP_T_MEM_01_CLAIM_RACE(t *testing.T) {
 	calls := dir + "/calls.jsonl"
 	enqueuedHandoff(t, agentBin, dir, dbPath, clockFile, 1)
 
-	a := startBarrier(t, agentBin, dir, append(agentBase(), []string{
+	a := startBarrier(t, agentBin, dir, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_claim", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=w-a", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...))
-	b := startBarrier(t, agentBin, dir, append(agentBase(), []string{
+	b := startBarrier(t, agentBin, dir, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_claim", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=w-b", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...))
 	waitReady(t, []*barrierAgent{a, b})
 	releaseBarrier(t, []*barrierAgent{a, b})
 	results := collect(t, []*Child{a.child, b.child}, 30*time.Second)
+	require.Equal(t, 2, len(results), "both workers must report a result: %v", results)
 
 	claimed := 0
 	rowID := ""
 	for _, m := range results {
-		if okOf(m) && m["claimed"].(bool) {
+		// A worker that reports an error is a broken harness, not a claim
+		// outcome — diagnose it instead of indexing blindly (review §2.4: the
+		// unchecked m["claimed"].(bool) repanicked and killed the whole test
+		// binary when a child found nothing to claim).
+		require.True(t, okOf(m), "worker result: %v", m)
+		if c, ok := m["claimed"].(bool); ok && c {
 			claimed++
 			rowID, _ = m["outbox_id"].(string)
 		}
 	}
-	assert.Equal(t, 1, claimed, "exactly one worker holds the row (C-OUTBOX-5)")
+	assert.Equal(t, 1, claimed, "exactly one worker holds the row (C-OUTBOX-17; second-process safety is C-OUTBOX-5)")
 	pdb := ParentDB(t, dbPath)
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM outbox WHERE status='processing' AND lease_owner IS NOT NULL`))
 	assert.Equal(t, "processing", pdb.Str(t, `SELECT status FROM outbox WHERE id=?`, rowID))
 	SaveEvidence(t, ev, "output.json", DumpJSON(results))
-	EvidenceNote(t, ev, "verdict.txt", "C-OUTBOX-5 MP PASS: 1 due row, 2 processes, exactly 1 claim, other reports nothing claimable\n")
+	VerdictNote(t, ev, "C-OUTBOX-17 MP PASS: 1 due row, 2 processes, exactly 1 claim, the other reports nothing claimable (C-OUTBOX-5 supports second-process safety)\n")
 }
 
 // TestMP_T_MEM_06 is row T-MEM-06 with a REAL second worker: worker A claims a
@@ -181,7 +189,7 @@ func TestMP_T_MEM_06(t *testing.T) {
 
 	// Worker A: one delivery attempt, killed after the adapter returned and
 	// before the local ack commits.
-	a, fifo := crashAgent(t, agentBin, dir, "memory.post_adapter_write", append(agentBase(), []string{
+	a, fifo := crashAgent(t, agentBin, dir, "memory.post_adapter_write", append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_once", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=worker-a", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...))
@@ -199,7 +207,7 @@ func TestMP_T_MEM_06(t *testing.T) {
 
 	// Worker B, step 1: reclaim only — the row must become uncertain FIRST,
 	// visibly, with no external id and no delivery claim (C-OUTBOX-6).
-	reclaimer := StartAgent(t, agentBin, append(agentBase(), []string{
+	reclaimer := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_reclaim", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=worker-b",
 	}...)...)
@@ -212,7 +220,7 @@ func TestMP_T_MEM_06(t *testing.T) {
 
 	// Worker B, step 2: one delivery — the same write id goes out again, the
 	// far end dedups by stable id, the committed ack is the only succeeded.
-	b := StartAgent(t, agentBin, append(agentBase(), []string{
+	b := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_loop", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=worker-b", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...)...)
@@ -231,7 +239,7 @@ func TestMP_T_MEM_06(t *testing.T) {
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM ticket_events WHERE type='memory_delivered'`), "exactly one delivered audit")
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"crash_marker": marker, "reclaim": rec, "worker_b": bres, "calls": callLines,
 		"lease_owners": pdb.strs(t, `SELECT DISTINCT COALESCE(lease_owner,'<unclaimed>') FROM outbox`)}))
-	EvidenceNote(t, ev, "verdict.txt", "T-MEM-06 PASS (MP): killed worker A mid-attempt -> processing -> clock past 60s -> worker B reclaims to uncertain FIRST (no external id) -> delivers with the same write id; far end deduped\n")
+	VerdictNote(t, ev, "T-MEM-06 PASS (MP): killed worker A mid-attempt -> processing -> clock past 60s -> worker B reclaims to uncertain FIRST (no external id) -> delivers with the same write id; far end deduped\n")
 }
 
 // TestMP_T_CRASH_C is the full outbox recovery matrix (row T-CRASH-c): a kill
@@ -252,7 +260,7 @@ func TestMP_T_CRASH_C(t *testing.T) {
 		calls := dir + "/" + sanitize(point) + "-calls.jsonl"
 		enqueuedHandoff(t, agentBin, dir, dbPath, clockFile, 1)
 
-		a, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(), []string{
+		a, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(clockFile), []string{
 			"LEDGERBOARD_TEST_OP=outbox_once", "LEDGERBOARD_TEST_DB=" + dbPath,
 			"LEDGERBOARD_TEST_WORKER_ID=worker-a", "LEDGERBOARD_TEST_CALLS=" + calls,
 		}...))
@@ -267,7 +275,7 @@ func TestMP_T_CRASH_C(t *testing.T) {
 
 		WriteClockMS(t, clockFile, base+OutboxLeaseMS()+60000)
 
-		reclaimer := StartAgent(t, agentBin, append(agentBase(), []string{
+		reclaimer := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 			"LEDGERBOARD_TEST_OP=outbox_reclaim", "LEDGERBOARD_TEST_DB=" + dbPath,
 			"LEDGERBOARD_TEST_WORKER_ID=worker-b",
 		}...)...)
@@ -275,7 +283,7 @@ func TestMP_T_CRASH_C(t *testing.T) {
 		_, _ = reclaimer.Wait(t)
 		require.Equal(t, "uncertain", pdb.Str(t, `SELECT status FROM outbox`), "%s: reclaim must label uncertain first", point)
 
-		b := StartAgent(t, agentBin, append(agentBase(), []string{
+		b := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 			"LEDGERBOARD_TEST_OP=outbox_loop", "LEDGERBOARD_TEST_DB=" + dbPath,
 			"LEDGERBOARD_TEST_WORKER_ID=worker-b", "LEDGERBOARD_TEST_CALLS=" + calls,
 		}...)...)
@@ -294,7 +302,7 @@ func TestMP_T_CRASH_C(t *testing.T) {
 			"attempts": pdb.Int(t, `SELECT attempts FROM outbox`)}
 	}
 	SaveEvidence(t, ev, "matrix.json", DumpJSON(matrix))
-	EvidenceNote(t, ev, "verdict.txt", "T-CRASH-c PASS (MP): both memory-boundary kills recover through uncertain + same-write-id retry; the far end dedups; one succeeded row, one audit (T-MEM-08 at-least-once included)\n")
+	VerdictNote(t, ev, "T-CRASH-c PASS (MP): both memory-boundary kills recover through uncertain + same-write-id retry; the far end dedups; one succeeded row, one audit (T-MEM-08 at-least-once included)\n")
 }
 
 // TestMP_T_MEM_06_STALE guards C-OUTBOX-7's MP shape: a worker that lost its
@@ -313,7 +321,7 @@ func TestMP_T_MEM_06_STALE(t *testing.T) {
 	calls := dir + "/calls.jsonl"
 	enqueuedHandoff(t, agentBin, dir, dbPath, clockFile, 1)
 
-	a := StartAgent(t, agentBin, append(agentBase(), []string{
+	a := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_claim", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=stale-worker", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...)...)
@@ -323,7 +331,7 @@ func TestMP_T_MEM_06_STALE(t *testing.T) {
 
 	WriteClockMS(t, clockFile, base+OutboxLeaseMS()+60000)
 
-	b := StartAgent(t, agentBin, append(agentBase(), []string{
+	b := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 		"LEDGERBOARD_TEST_OP=outbox_loop", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_WORKER_ID=fresh-worker", "LEDGERBOARD_TEST_CALLS=" + calls,
 	}...)...)
@@ -336,5 +344,5 @@ func TestMP_T_MEM_06_STALE(t *testing.T) {
 	assert.Equal(t, "fresh-worker", pdb.Str(t, `SELECT lease_owner FROM outbox`), "the winning ack is the lease holder at ack time")
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM ticket_events WHERE type='memory_delivered'`))
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"claim": ares, "deliver": bres}))
-	EvidenceNote(t, ev, "verdict.txt", "C-OUTBOX-7 MP PASS: only the lease-holding worker's ack lands; the row's WHERE lease_owner guard decides\n")
+	VerdictNote(t, ev, "C-OUTBOX-7 MP PASS: only the lease-holding worker's ack lands; the row's WHERE lease_owner guard decides\n")
 }

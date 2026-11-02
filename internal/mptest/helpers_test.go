@@ -181,8 +181,21 @@ func claimEnv(dbPath, ticket, actorRef string) []string {
 	}
 }
 
-// agentBase is the common env prefix every agent child needs.
-func agentBase() []string { return []string{"LEDGERBOARD_TEST_AGENT=1"} }
+// agentBase is the common env prefix every agent child needs. The fake clock
+// is part of the constructor (skill mptest-fake-clock-discipline; design
+// review §2.3): a child that reads or writes anything time-dependent must run
+// on the SAME clock file the parent's OpenStore uses, or the two processes
+// disagree about now_ms and an operation "wins" that the contract forbids
+// (C-CLAIM-14). A fake-clock row therefore cannot spawn a real-clock child:
+// every call site in one passes its clockFile; only genuinely real-time rows
+// pass "".
+func agentBase(clockFile string) []string {
+	base := []string{"LEDGERBOARD_TEST_AGENT=1"}
+	if clockFile != "" {
+		base = append(base, "LEDGERBOARD_CLOCK=fake", "LEDGERBOARD_CLOCK_FILE="+clockFile)
+	}
+	return base
+}
 
 // fixtureBoard is the one-board/one-ticket fixture of the claim rows.
 func fixtureBoard(t *testing.T, s *store.SQLiteStore, title string) (string, string) {

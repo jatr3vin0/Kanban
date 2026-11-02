@@ -143,11 +143,33 @@ func writeOut(res result) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(line))
+	// Write the OUT file FIRST and fsync it, THEN print the result line (review
+	// §3.2: the caller's contract is "a result line implies the OUT file is
+	// complete"; the old print-then-write order made that guarantee accidental
+	// instead of structural).
 	if p := getenv(envOut); p != "" {
-		return os.WriteFile(p, append(line, '\n'), 0o600)
+		if err := writeFileSync(p, append(line, '\n')); err != nil {
+			return fmt.Errorf("write %s: %w", p, err)
+		}
 	}
+	fmt.Println(string(line))
 	return nil
+}
+
+func writeFileSync(path string, b []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // opExecFile executes a semicolon-separated SQL file — the explicit Down
@@ -352,13 +374,16 @@ func opWaitSchema(conn *sql.DB, res *result) error {
 	}
 }
 
-// opDump writes a rowid-ordered JSON snapshot of the named (or all 0001)
-// tables — the byte-comparison baseline of §4.1/§4.2.
+// opDump writes a rowid-ordered JSON snapshot of the named (or all) tables —
+// the byte-comparison baseline of §4.1/§4.2. The table set is UNAMBIGUOUS
+// (review §3.2(3): getenv cannot distinguish "set to empty" from "unset", so
+// the old accidental fall-through to all-tables is gone): LEDGERBOARD_TEST_
+// TABLES="*" means every user table, a comma list means those tables, and an
+// unset/empty variable is an error, never a silent choice.
 func opDump(conn *sql.DB, res *result) error {
 	tables := []string{}
-	if t := getenv(envTables); t != "" {
-		tables = strings.Split(t, ",")
-	} else {
+	switch t := getenv(envTables); {
+	case t == "*":
 		rows, err := conn.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('schema_migrations') ORDER BY name`)
 		if err != nil {
 			return err
@@ -372,6 +397,10 @@ func opDump(conn *sql.DB, res *result) error {
 			tables = append(tables, n)
 		}
 		rows.Close()
+	case t == "":
+		return fmt.Errorf("%s must be set: '*' for all tables or a comma list", envTables)
+	default:
+		tables = strings.Split(t, ",")
 	}
 	out := map[string]any{}
 	for _, t := range tables {

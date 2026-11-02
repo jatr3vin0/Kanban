@@ -394,10 +394,16 @@ func ParentDB(t *testing.T, path string) *sqlDB {
 
 // ---- evidence ---------------------------------------------------------------
 
-// EvidenceDir creates docs/test-results/phase-2/<row>/ and writes command.txt.
+// EvidenceDir creates the row's evidence directory UNDER THE SCRATCH ROOT and
+// writes command.txt. Evidence never lands in the tree during a run (review
+// addendum §8): a re-run regenerates UUIDs and timestamps, so writing straight
+// into docs/ meant every `go test` dirtied the tree and a reviewer could not
+// re-verify a row cleanly. scripts/run-test-plan.sh promotes the scratch
+// evidence into docs/test-results/phase-2/ deliberately — promotion is the
+// author's act, not a side effect of running the suite.
 func EvidenceDir(t *testing.T, row string, command string) string {
 	t.Helper()
-	dir := filepath.Join(RepoRoot(t), "docs", "test-results", "phase-2", row)
+	dir := filepath.Join(ScratchRoot, "evidence", "phase-2", row)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("evidence dir: %v", err)
 	}
@@ -419,7 +425,7 @@ func writeEvidence(t *testing.T, dir, name, content string) {
 	}
 }
 
-// EvidenceNote appends to a file (e.g. the per-row verdict line).
+// EvidenceNote appends to a file (e.g. an observation log).
 func EvidenceNote(t *testing.T, dir, name, content string) {
 	f, err := os.OpenFile(filepath.Join(dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -428,6 +434,27 @@ func EvidenceNote(t *testing.T, dir, name, content string) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(content)
+}
+
+// VerdictNote schedules the row's verdict.txt, written during t.Cleanup and
+// derived from t.Failed() — a failed row can never ship a PASS line (review
+// §4: the old unconditional end-of-test append let T-CRASH-d ship
+// "PASS … dump-identical" for a run whose dump comparison had failed). The
+// file is overwritten, not appended, so a re-run rewrites it to exactly one
+// line instead of accumulating verdicts across runs.
+func VerdictNote(t *testing.T, dir, passLine string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if t.Failed() {
+			writeEvidence(t, dir, "verdict.txt",
+				"FAIL — the row did not pass; read the go test transcript for the failed assertions.\n"+
+					"This file is derived from t.Failed() (review §4): it is written as FAIL whenever\n"+
+					"any assertion in the row failed or the row died early, and carries the PASS line\n"+
+					"below only when every assertion actually ran and passed.\n")
+			return
+		}
+		writeEvidence(t, dir, "verdict.txt", passLine)
+	})
 }
 
 // DumpJSON renders a value as indented JSON for evidence files.

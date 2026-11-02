@@ -55,7 +55,7 @@ func TestMP_T_CRASH_A(t *testing.T) {
 			s := OpenStore(t, dbPath, clockFile)
 			_, tk := fixtureBoard(t, s, fmt.Sprintf("crash a %s %d", point, i))
 
-			child, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(), []string{
+			child, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(clockFile), []string{
 				"LEDGERBOARD_TEST_OP=claim_idem", "LEDGERBOARD_TEST_DB=" + dbPath,
 				"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 				"LEDGERBOARD_TEST_KEY=ka",
@@ -70,7 +70,7 @@ func TestMP_T_CRASH_A(t *testing.T) {
 			assert.Equal(t, h, a, "iteration %d %s: claim and audit must survive or vanish together", i, point)
 
 			// Recovery: retry the SAME key from a fresh process.
-			retry := StartAgent(t, agentBin, append(agentBase(), []string{
+			retry := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 				"LEDGERBOARD_TEST_OP=claim_idem", "LEDGERBOARD_TEST_DB=" + dbPath,
 				"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 				"LEDGERBOARD_TEST_KEY=ka",
@@ -95,7 +95,7 @@ func TestMP_T_CRASH_A(t *testing.T) {
 		}
 	}
 	SaveEvidence(t, ev, "survivors.json", DumpJSON(record))
-	EvidenceNote(t, ev, "verdict.txt", "T-CRASH-a PASS (MP): 20x pre-commit -> nothing survives, retry re-executes; 20x post-commit -> claim+audit+key survive, retry replays; claim-without-audit never observed\n")
+	VerdictNote(t, ev, "T-CRASH-a PASS (MP): 20x pre-commit -> nothing survives, retry re-executes; 20x post-commit -> claim+audit+key survive, retry replays; claim-without-audit never observed\n")
 }
 
 // countClaimSurvivors returns the three survivor counters of boundary (a).
@@ -131,7 +131,7 @@ func TestMP_T_CRASH_B(t *testing.T) {
 		}
 	}
 	handoffEnv := func(dbPath, tkID string, gen, ver int64) []string {
-		return append(agentBase(), []string{
+		return append(agentBase(clockFile), []string{
 			"LEDGERBOARD_TEST_OP=handoff_create", "LEDGERBOARD_TEST_DB=" + dbPath,
 			"LEDGERBOARD_TEST_TICKET=" + tkID, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 			"LEDGERBOARD_TEST_KEY=hb",
@@ -183,7 +183,7 @@ func TestMP_T_CRASH_B(t *testing.T) {
 		}
 	}
 	SaveEvidence(t, ev, "survivors.json", DumpJSON(results))
-	EvidenceNote(t, ev, "verdict.txt", "T-CRASH-b PASS (MP): after_handoff_insert and pre_commit leave nothing across 20x each; the unarmed control shows the committed shape; retries recreate handoff+outbox+audits+key atomically\n")
+	VerdictNote(t, ev, "T-CRASH-b PASS (MP): after_handoff_insert and pre_commit leave nothing across 20x each; the unarmed control shows the committed shape; retries recreate handoff+outbox+audits+key atomically\n")
 }
 
 func sanitize(s string) string {
@@ -221,14 +221,15 @@ func TestMP_T_CRASH_E(t *testing.T) {
 			require.NoError(t, err)
 			origExpiry := *ct.Claim.ExpiresAtMS
 
-			// The renewal happens 30 s later on the fake clock (still inside
-			// the original window, TTL=15 min).
+			// Advance the shared clock 30 s — relabelled, not waited. The
+			// renewal then happens on the fake clock (still inside the
+			// original window, TTL=15 min); agentBase(clockFile) carries the
+			// clock pair to the child.
 			WriteClockMS(t, clockFile, base+30000)
-			child, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(), []string{
+			child, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(clockFile), []string{
 				"LEDGERBOARD_TEST_OP=renew", "LEDGERBOARD_TEST_DB=" + dbPath,
 				"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 				fmt.Sprintf("LEDGERBOARD_TEST_GEN=%d", ct.Claim.Generation),
-				"LEDGERBOARD_CLOCK=fake", "LEDGERBOARD_CLOCK_FILE=" + clockFile,
 			}...))
 			marker := ReadFIFO(t, fifo, 30*time.Second)
 			require.Contains(t, marker, "crash "+point)
@@ -244,12 +245,12 @@ func TestMP_T_CRASH_E(t *testing.T) {
 				assert.Equal(t, origExpiry, expiry, "pre-commit: the lease keeps its original expiry")
 				assert.Equal(t, int64(0), renewals, "pre-commit: no renewals recorded")
 				assert.Equal(t, int64(0), audits, "pre-commit: no claim_renewed row")
-				// Recovery: the same holder+generation renews inside the window.
-				retry := StartAgent(t, agentBin, append(agentBase(), []string{
+				// Recovery: the same holder+generation renews inside the window
+				// (the clock pair comes from agentBase(clockFile)).
+				retry := StartAgent(t, agentBin, append(agentBase(clockFile), []string{
 					"LEDGERBOARD_TEST_OP=renew", "LEDGERBOARD_TEST_DB=" + dbPath,
 					"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 					fmt.Sprintf("LEDGERBOARD_TEST_GEN=%d", ct.Claim.Generation),
-					"LEDGERBOARD_CLOCK=fake", "LEDGERBOARD_CLOCK_FILE=" + clockFile,
 				}...)...)
 				res := retry.Line(t, 30*time.Second)
 				_, _ = retry.Wait(t)
@@ -264,7 +265,7 @@ func TestMP_T_CRASH_E(t *testing.T) {
 		}
 	}
 	SaveEvidence(t, ev, "observed.json", DumpJSON(record))
-	EvidenceNote(t, ev, "verdict.txt", "T-CRASH-e PASS (MP): pre-commit leaves the original lease (retry renews in-window); post-commit leaves extension+audit together\n")
+	VerdictNote(t, ev, "T-CRASH-e PASS (MP): pre-commit leaves the original lease (retry renews in-window); post-commit leaves extension+audit together\n")
 }
 
 // TestMP_T_FALSIFIABLE re-states the falsifiability procedure for the crash
@@ -284,5 +285,5 @@ func TestMP_T_FALSIFIABLE(t *testing.T) {
 			"produces the zero. For T-CRASH-c the falsified run shows attempts=1 and\n"+
 			"one calls.jsonl line (the ack commits) instead of the crash leg's 2.\n"+
 			"Result: recorded in negctl-output.txt; the copy was deleted afterwards.\n")
-	EvidenceNote(t, ev, "verdict.txt", "falsifiability: see falsify.txt and negctl-output.txt\n")
+	VerdictNote(t, ev, "falsifiability: see falsify.txt and negctl-output.txt\n")
 }

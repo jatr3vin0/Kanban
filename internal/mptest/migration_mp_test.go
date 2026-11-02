@@ -225,18 +225,30 @@ func applyOddities(t *testing.T, dbprocBin, dbPath string) {
 }
 
 // tableSnapshot dumps the named tables rowid-ordered to a JSON file via
-// harness-dbproc and returns the bytes.
+// harness-dbproc and returns the bytes. tables == "" means "all tables" via
+// the explicit "*" sentinel (review §3.2(3): getenv cannot distinguish an
+// empty value from an unset one, so the sentinel is the only all-tables form).
+// A dump that proves nothing fails HERE, with a message that names the
+// problem — never downstream as a phantom data diff (review §3.2(2)).
 func tableSnapshot(t *testing.T, dbprocBin, dbPath, outPath, tables string) []byte {
 	t.Helper()
+	spec := tables
+	if spec == "" {
+		spec = "*"
+	}
 	d := StartDBProc(t, dbprocBin,
 		"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=dump",
 		"LEDGERBOARD_TEST_DB="+dbPath, "LEDGERBOARD_TEST_OUT="+outPath,
-		"LEDGERBOARD_TEST_TABLES="+tables)
+		"LEDGERBOARD_TEST_TABLES="+spec)
 	res := d.Line(t, 30*time.Second)
 	_, _ = d.Wait(t)
 	require.True(t, okOf(res), "dump: %v", res)
+	tabs, ok := res["tables"].(map[string]any)
+	require.True(t, ok, "dump result carries no tables map — a dump that proves nothing must fail at the dump: %v", res)
+	require.NotEmpty(t, tabs, "dump reports zero tables — nothing to compare")
 	raw, err := os.ReadFile(outPath)
 	require.NoError(t, err)
+	require.NotEmpty(t, raw, "dump OUT file %s is empty", outPath)
 	return raw
 }
 
@@ -354,7 +366,7 @@ func TestMP_T_MIG_01(t *testing.T) {
 	assert.Equal(t, int64(10), counts["relations"])
 	assert.Greater(t, counts["ticket_events"], int64(100), "natural audit rows from every mutation")
 	SaveEvidence(t, ev, "counts.json", DumpJSON(counts))
-	EvidenceNote(t, ev, "verdict.txt", "T-MIG-01 PASS: upstream-populated fixture (pinned "+UpstreamPin[:12]+"), 3 boards/3 epics/40 tickets/25 notes/30 tasks/10 relations + oddities; before.json is the baseline\n")
+	VerdictNote(t, ev, "T-MIG-01 PASS: upstream-populated fixture (pinned "+UpstreamPin[:12]+"), 3 boards/3 epics/40 tickets/25 notes/30 tasks/10 relations + oddities; before.json is the baseline\n")
 }
 
 // fixtureOnce builds the fixture once for the rows that consume it, reusing
@@ -428,7 +440,7 @@ func TestMP_T_MIG_02(t *testing.T) {
 
 	after := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "after.json"), "")
 	SaveEvidence(t, ev, "after.json", string(after))
-	bb, aa := project0001(before, after)
+	bb, aa := project0001(t, before, after)
 	assert.Equal(t, bb, aa, "all 0001 tables byte-identical (C-COMPAT-4)")
 
 	// Second open is a no-op.
@@ -437,7 +449,7 @@ func TestMP_T_MIG_02(t *testing.T) {
 	assert.Equal(t, int64(2), v2)
 	assert.False(t, dirty2)
 	after2 := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "after2.json"), "")
-	assert.Equal(t, normalizeDump(after), normalizeDump(after2), "second open changed nothing")
+	assert.Equal(t, normalizeDump(t, after), normalizeDump(t, after2), "second open changed nothing")
 
 	// Concurrent-starts leg: three product binaries against one unmigrated copy.
 	concPath := filepath.Join(dir, "concurrent.db")
@@ -483,7 +495,7 @@ func TestMP_T_MIG_02(t *testing.T) {
 	// open must be the contracted one.
 	vc, dirtyc, _ := migrationsState(t, dbprocBin, concPath)
 	concDump := tableSnapshot(t, dbprocBin, concPath, filepath.Join(dir, "after-concurrent.json"), "")
-	bb, aa = project0001(before, concDump)
+	bb, aa = project0001(t, before, concDump)
 	assert.Equal(t, bb, aa, "concurrent starts: 0001 data intact (no torn state)")
 	assert.Empty(t, fkViolations(t, dbprocBin, concPath))
 	recoveryNote := ""
@@ -505,7 +517,7 @@ func TestMP_T_MIG_02(t *testing.T) {
 		assert.Equal(t, int64(2), vc2)
 		assert.False(t, dirtyc2, "force recovery must land on a healthy file")
 		recovered := tableSnapshot(t, dbprocBin, concPath, filepath.Join(dir, "after-concurrent-recovered.json"), "")
-		assert.Equal(t, normalizeDump(after), normalizeDump(recovered), "recovered state equals the clean migration")
+		assert.Equal(t, normalizeDump(t, after), normalizeDump(t, recovered), "recovered state equals the clean migration")
 		recoveryNote = "concurrent starts left dirty=1; fail-closed restart + force recovered to the clean state"
 	} else {
 		assert.Equal(t, int64(2), vc, "healthy migration outcome")
@@ -514,7 +526,7 @@ func TestMP_T_MIG_02(t *testing.T) {
 	SaveEvidence(t, ev, "concurrent-outcomes.json", DumpJSON(map[string]any{
 		"outcomes": outcomes, "version": vc, "dirty": dirtyc, "note": recoveryNote,
 	}))
-	EvidenceNote(t, ev, "verdict.txt", "T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state ("+recoveryNote+")\n")
+	VerdictNote(t, ev, "T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state ("+recoveryNote+")\n")
 }
 
 // project0001 restricts the post-migration dump to the tables and row columns
@@ -522,17 +534,23 @@ func TestMP_T_MIG_02(t *testing.T) {
 // compares DATA, not the additive schema: 0002 adds three empty tables and
 // eight ticket columns, and counting them as differences fails every healthy
 // migration (observed in the first full run: tables 7 vs 10).
-func project0001(before, after any) (map[string]any, map[string]any) {
-	b := normalizeDump(before)
-	a := normalizeDump(after)
+//
+// Run-4 defect (review §3): normalizeDump returns the dbproc RESULT LINE
+// (op/ok/tables) and the old project0001 iterated its TOP-LEVEL keys — so the
+// "tables" key was skipped (its value is a map of tables, not a row list) and
+// the projection was ALWAYS empty, even for two healthy dumps. It now
+// descends into "tables" on both sides.
+func project0001(t *testing.T, before, after any) (map[string]any, map[string]any) {
+	b := tablesOf(t, normalizeDump(t, before))
+	a := tablesOf(t, normalizeDump(t, after))
 	proj := map[string]any{}
-	for t, rows := range a {
-		brows, ok := b[t].([]any)
+	for name, rows := range a {
+		brows, ok := b[name].([]any)
 		if !ok {
 			continue // a table 0002 added
 		}
 		if len(brows) == 0 {
-			proj[t] = brows
+			proj[name] = brows
 			continue
 		}
 		keys := map[string]bool{}
@@ -551,26 +569,57 @@ func project0001(before, after any) (map[string]any, map[string]any) {
 			}
 			out = append(out, nr)
 		}
-		proj[t] = out
+		proj[name] = out
 	}
 	return b, proj
 }
 
-// normalizeDump parses a dbproc dump file into its table->rows map so two
+// normalizeDump parses a dbproc dump file into its result-line map so two
 // snapshots compare structurally (JSON object key order is not guaranteed).
-func normalizeDump(raw any) map[string]any {
-	b := []byte(nil)
+// Unparseable or empty input is a HARNESS failure with a named message —
+// never an empty map swallowed into a phantom data diff (review §3.2(2)).
+func normalizeDump(t *testing.T, raw any) map[string]any {
+	t.Helper()
+	var b []byte
 	switch v := raw.(type) {
 	case string:
-		b, _ = os.ReadFile(v)
+		var err error
+		b, err = os.ReadFile(v)
+		if err != nil {
+			t.Fatalf("dump file %s unreadable: %v", v, err)
+		}
 	case []byte:
 		b = v
+	default:
+		t.Fatalf("normalizeDump: unsupported input %T", raw)
 	}
 	var m map[string]any
 	if err := json.Unmarshal(b, &m); err != nil {
-		return map[string]any{"unparsable": string(b)}
+		t.Fatalf("dump unparseable (%d bytes): %v", len(b), err)
+	}
+	if m == nil || len(m) == 0 {
+		t.Fatalf("dump parsed to an empty object (%d bytes) — not a successful dump", len(b))
 	}
 	return m
+}
+
+// tablesOf extracts the dump's tables map, failing loudly when absent.
+func tablesOf(t *testing.T, m map[string]any) map[string]any {
+	t.Helper()
+	tabs, ok := m["tables"].(map[string]any)
+	if !ok {
+		t.Fatalf("dump result has no tables map (keys: %v) — a dump that proves nothing must fail at the dump", keysOf(m))
+	}
+	return tabs
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sortStrings(out)
+	return out
 }
 
 // TestMP_T_MIG_04 is row T-MIG-04: the explicit down/up round trip on the
@@ -599,7 +648,7 @@ func TestMP_T_MIG_04(t *testing.T) {
 	copyFixture(t, fixturePath, migPath)
 	migrateWithProduct(t, serverBin, migPath)
 	upDump := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "up.json"), "")
-	bProj, aProj := project0001(before, upDump)
+	bProj, aProj := project0001(t, before, upDump)
 	assert.Equal(t, bProj, aProj, "pre-down: 0001 data intact")
 
 	// Explicit Down by the contracted text.
@@ -618,7 +667,7 @@ func TestMP_T_MIG_04(t *testing.T) {
 	}
 	assert.Empty(t, fkViolations(t, dbprocBin, migPath), "down state: foreign_key_check empty")
 	downDump := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "down.json"), "")
-	bProj, aProj = project0001(before, downDump)
+	bProj, aProj = project0001(t, before, downDump)
 	assert.Equal(t, bProj, aProj, "0001 data survives the down migration")
 
 	// Up again: defaults re-applied, data still identical.
@@ -627,9 +676,9 @@ func TestMP_T_MIG_04(t *testing.T) {
 	assert.True(t, hasV && v == 2 && !dirty)
 	assert.Equal(t, int64(40), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE version=1 AND lease_generation=0`), "defaults re-applied on up")
 	reupDump := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "reup.json"), "")
-	bProj, aProj = project0001(before, reupDump)
+	bProj, aProj = project0001(t, before, reupDump)
 	assert.Equal(t, bProj, aProj, "0001 data identical after the round trip")
-	EvidenceNote(t, ev, "verdict.txt", "T-MIG-04 PASS: down to 11 columns (indexes first), fk empty, 0001 data survives both directions, defaults re-applied by re-up\n")
+	VerdictNote(t, ev, "T-MIG-04 PASS: down to 11 columns (indexes first), fk empty, 0001 data survives both directions, defaults re-applied by re-up\n")
 }
 
 // TestMP_T_MIG_05 is row T-MIG-05: the upstream binary at the pinned commit
@@ -681,7 +730,7 @@ func TestMP_T_MIG_05(t *testing.T) {
 
 	// Dump-diff: exactly the new rows differ from the pre-write state.
 	dump := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "after-upstream.json"), "")
-	after := normalizeDump(dump)["tickets"].([]any)
+	after := tablesOf(t, normalizeDump(t, dump))["tickets"].([]any)
 	ticketsCreated := 0
 	for _, row := range after {
 		m, _ := row.(map[string]any)
@@ -690,10 +739,10 @@ func TestMP_T_MIG_05(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, ticketsCreated, "the upstream write landed; nothing else corrupted")
-	pre := normalizeDump(before)["tickets"].([]any)
+	pre := tablesOf(t, normalizeDump(t, before))["tickets"].([]any)
 	assert.Equal(t, len(pre)+1, len(after), "exactly one new ticket, no silent corruption")
 	SaveEvidence(t, ev, "upstream-on-0002.txt", "upstream log:\n"+log.String()+"\nupstream create/update/list all 2xx\n")
-	EvidenceNote(t, ev, "verdict.txt", "T-MIG-05 PASS: upstream (pinned) opens the 0002 DB, writes and reads 2xx, dump-diff shows only its own new row\n")
+	VerdictNote(t, ev, "T-MIG-05 PASS: upstream (pinned) opens the 0002 DB, writes and reads 2xx, dump-diff shows only its own new row\n")
 }
 
 // TestMP_T_MIG_06 is row T-MIG-06: open/migrate five times — the bookkeeping
@@ -716,10 +765,10 @@ func TestMP_T_MIG_06(t *testing.T) {
 		v, dirty, hasV := migrationsState(t, dbprocBin, path)
 		require.True(t, hasV && v == 2 && !dirty, "open %d: (v=%d dirty=%v)", i+1, v, dirty)
 		lastDump = tableSnapshot(t, dbprocBin, path, filepath.Join(dir, fmt.Sprintf("open%d.json", i+1)), "")
-		bProj, aProj := project0001(before, lastDump)
+		bProj, aProj := project0001(t, before, lastDump)
 		require.Equal(t, bProj, aProj, "open %d: data stable", i+1)
 	}
-	EvidenceNote(t, ev, "verdict.txt", "T-MIG-06 PASS: five opens, bookkeeping stays 2/non-dirty, data stable across all five\n")
+	VerdictNote(t, ev, "T-MIG-06 PASS: five opens, bookkeeping stays 2/non-dirty, data stable across all five\n")
 }
 
 // TestMP_T_CRASH_D is row T-CRASH-d: crash DURING migration, from a copy of
@@ -794,7 +843,7 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	require.True(t, dirty, "the killed migration left dirty=1 (got version=%d dirty=%v)", v, dirty)
 	_ = v
 	killedDump := tableSnapshot(t, dbprocBin, crashPath, filepath.Join(dir, "killed.json"), "")
-	bb, aa := project0001(before, killedDump)
+	bb, aa := project0001(t, before, killedDump)
 	assert.Equal(t, bb, aa, "the 0001 data survived the mid-migration kill untouched")
 
 	// Fail-closed restart: exits non-zero BEFORE binding, with the one-line
@@ -825,10 +874,10 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	assert.False(t, dirty2, "the recovery completes the migration")
 	assert.Equal(t, allowlist, masterObjects(t, dbprocBin, crashPath), "recovered schema equals the clean migration")
 	recoveredDump := tableSnapshot(t, dbprocBin, crashPath, filepath.Join(dir, "recovered.json"), "")
-	assert.Equal(t, normalizeDump(cleanDump), normalizeDump(recoveredDump), "recovered end state is dump-identical to the clean migration of T-MIG-02")
+	assert.Equal(t, normalizeDump(t, cleanDump), normalizeDump(t, recoveredDump), "recovered end state is dump-identical to the clean migration of T-MIG-02")
 	assert.Empty(t, fkViolations(t, dbprocBin, crashPath))
 	pdb := ParentDB(t, crashPath)
 	assert.Equal(t, int64(40), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE version=1 AND lease_generation=0`), "pre-existing rows carry the defaults after recovery")
 	SaveEvidence(t, ev, "recovery.json", DumpJSON(map[string]any{"watcher": wres, "fail_closed_exit": code, "version_after": v2, "dirty_after": dirty2}))
-	EvidenceNote(t, ev, "verdict.txt", "T-CRASH-d PASS (MP): external watcher + controller SIGKILL mid-migration; dirty=1; restart fails closed (exit!=0, C-SCHEMA-19 line, no listener); operator force completes it to a dump-identical clean state. FINDING: per-statement landmarks k=11/14/19 unobservable — the vendored driver tx-wraps the whole file (see landmarks.json).\n")
+	VerdictNote(t, ev, "T-CRASH-d PASS (MP): external watcher + controller SIGKILL mid-migration; dirty=1; restart fails closed (exit!=0, C-SCHEMA-19 line, no listener); operator force completes it to a dump-identical clean state. FINDING: per-statement landmarks k=11/14/19 unobservable — the vendored driver tx-wraps the whole file (see landmarks.json).\n")
 }
