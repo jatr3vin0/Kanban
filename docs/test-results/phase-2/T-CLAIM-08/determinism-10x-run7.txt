@@ -1,5 +1,5 @@
 === RUN   TestMP_T_CLAIM_08_EXPIRY_RACE
---- PASS: TestMP_T_CLAIM_08_EXPIRY_RACE (0.18s)
+--- PASS: TestMP_T_CLAIM_08_EXPIRY_RACE (0.67s)
 === RUN   TestMP_T_CLAIM_08_EXPIRY_RACE
 --- PASS: TestMP_T_CLAIM_08_EXPIRY_RACE (0.01s)
 === RUN   TestMP_T_CLAIM_08_EXPIRY_RACE
@@ -19,4 +19,4 @@
 === RUN   TestMP_T_CLAIM_08_EXPIRY_RACE
 --- PASS: TestMP_T_CLAIM_08_EXPIRY_RACE (0.01s)
 PASS
-ok  	github.com/rgracey/kanban-mcp/internal/mptest	0.299s
+ok  	github.com/rgracey/kanban-mcp/internal/mptest	0.796s
