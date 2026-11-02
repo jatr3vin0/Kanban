@@ -7,6 +7,7 @@ package mptest
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +19,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	msqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/rgracey/kanban-mcp/internal/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,6 +31,24 @@ import (
 const UpstreamPin = "c6938a2e6e0f3b2aca6cebf4afd93babd94d8317"
 
 func nextPort() int { return 18400 + int(fifoSeq.Add(1))%300 }
+
+// migrateDownOne runs one golang-migrate Down step against dbPath, sourcing
+// the migrations from the repo's own directory (never a copy) — the operator
+// CLI equivalent, from the parent's own process and connection.
+func migrateDownOne(t *testing.T, dbPath string) {
+	t.Helper()
+	dbh, err := sql.Open("sqlite", db.DSN(dbPath))
+	require.NoError(t, err)
+	defer dbh.Close()
+	src, err := iofs.New(os.DirFS(AbsFromRepo(t, "internal/db/migrations")), ".")
+	require.NoError(t, err)
+	defer func() { _ = src.Close() }()
+	drv, err := msqlite.WithInstance(dbh, &msqlite.Config{MigrationsTable: "schema_migrations"})
+	require.NoError(t, err)
+	m, err := migrate.NewWithInstance("iofs", src, "sqlite", drv)
+	require.NoError(t, err)
+	require.NoError(t, m.Steps(-1), "down one step (v2 -> v1)")
+}
 
 // upstreamBin builds the upstream binary at the pinned commit into the scratch
 // bin dir, via a throwaway worktree (the plan's own §4.1 command), then removes
@@ -405,7 +428,8 @@ func TestMP_T_MIG_02(t *testing.T) {
 
 	after := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "after.json"), "")
 	SaveEvidence(t, ev, "after.json", string(after))
-	assert.Equal(t, normalizeDump(before), normalizeDump(after), "all 0001 tables byte-identical (C-COMPAT-4)")
+	bb, aa := project0001(before, after)
+	assert.Equal(t, bb, aa, "all 0001 tables byte-identical (C-COMPAT-4)")
 
 	// Second open is a no-op.
 	migrateWithProduct(t, serverBin, migPath)
@@ -459,7 +483,8 @@ func TestMP_T_MIG_02(t *testing.T) {
 	// open must be the contracted one.
 	vc, dirtyc, _ := migrationsState(t, dbprocBin, concPath)
 	concDump := tableSnapshot(t, dbprocBin, concPath, filepath.Join(dir, "after-concurrent.json"), "")
-	assert.Equal(t, normalizeDump(before), normalizeDump(concDump), "concurrent starts: 0001 data intact (no torn state)")
+	bb, aa = project0001(before, concDump)
+	assert.Equal(t, bb, aa, "concurrent starts: 0001 data intact (no torn state)")
 	assert.Empty(t, fkViolations(t, dbprocBin, concPath))
 	recoveryNote := ""
 	if dirtyc {
@@ -490,6 +515,45 @@ func TestMP_T_MIG_02(t *testing.T) {
 		"outcomes": outcomes, "version": vc, "dirty": dirtyc, "note": recoveryNote,
 	}))
 	EvidenceNote(t, ev, "verdict.txt", "T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state ("+recoveryNote+")\n")
+}
+
+// project0001 restricts the post-migration dump to the tables and row columns
+// that exist in the 0001 fixture dump. "The 0001 data is intact" (C-COMPAT-4)
+// compares DATA, not the additive schema: 0002 adds three empty tables and
+// eight ticket columns, and counting them as differences fails every healthy
+// migration (observed in the first full run: tables 7 vs 10).
+func project0001(before, after any) (map[string]any, map[string]any) {
+	b := normalizeDump(before)
+	a := normalizeDump(after)
+	proj := map[string]any{}
+	for t, rows := range a {
+		brows, ok := b[t].([]any)
+		if !ok {
+			continue // a table 0002 added
+		}
+		if len(brows) == 0 {
+			proj[t] = brows
+			continue
+		}
+		keys := map[string]bool{}
+		for k := range brows[0].(map[string]any) {
+			keys[k] = true
+		}
+		arows, _ := rows.([]any)
+		out := make([]any, 0, len(arows))
+		for _, r := range arows {
+			rm, _ := r.(map[string]any)
+			nr := map[string]any{}
+			for k, v := range rm {
+				if keys[k] {
+					nr[k] = v
+				}
+			}
+			out = append(out, nr)
+		}
+		proj[t] = out
+	}
+	return b, proj
 }
 
 // normalizeDump parses a dbproc dump file into its table->rows map so two
@@ -535,7 +599,8 @@ func TestMP_T_MIG_04(t *testing.T) {
 	copyFixture(t, fixturePath, migPath)
 	migrateWithProduct(t, serverBin, migPath)
 	upDump := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "up.json"), "")
-	assert.Equal(t, normalizeDump(before), normalizeDump(upDump), "pre-down: 0001 data intact")
+	bProj, aProj := project0001(before, upDump)
+	assert.Equal(t, bProj, aProj, "pre-down: 0001 data intact")
 
 	// Explicit Down by the contracted text.
 	d := StartDBProc(t, dbprocBin,
@@ -553,7 +618,8 @@ func TestMP_T_MIG_04(t *testing.T) {
 	}
 	assert.Empty(t, fkViolations(t, dbprocBin, migPath), "down state: foreign_key_check empty")
 	downDump := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "down.json"), "")
-	assert.Equal(t, normalizeDump(before), normalizeDump(downDump), "0001 data survives the down migration")
+	bProj, aProj = project0001(before, downDump)
+	assert.Equal(t, bProj, aProj, "0001 data survives the down migration")
 
 	// Up again: defaults re-applied, data still identical.
 	migrateWithProduct(t, serverBin, migPath)
@@ -561,7 +627,8 @@ func TestMP_T_MIG_04(t *testing.T) {
 	assert.True(t, hasV && v == 2 && !dirty)
 	assert.Equal(t, int64(40), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE version=1 AND lease_generation=0`), "defaults re-applied on up")
 	reupDump := tableSnapshot(t, dbprocBin, migPath, filepath.Join(dir, "reup.json"), "")
-	assert.Equal(t, normalizeDump(before), normalizeDump(reupDump), "0001 data identical after the round trip")
+	bProj, aProj = project0001(before, reupDump)
+	assert.Equal(t, bProj, aProj, "0001 data identical after the round trip")
 	EvidenceNote(t, ev, "verdict.txt", "T-MIG-04 PASS: down to 11 columns (indexes first), fk empty, 0001 data survives both directions, defaults re-applied by re-up\n")
 }
 
@@ -649,7 +716,8 @@ func TestMP_T_MIG_06(t *testing.T) {
 		v, dirty, hasV := migrationsState(t, dbprocBin, path)
 		require.True(t, hasV && v == 2 && !dirty, "open %d: (v=%d dirty=%v)", i+1, v, dirty)
 		lastDump = tableSnapshot(t, dbprocBin, path, filepath.Join(dir, fmt.Sprintf("open%d.json", i+1)), "")
-		require.Equal(t, normalizeDump(before), normalizeDump(lastDump), "open %d: data stable", i+1)
+		bProj, aProj := project0001(before, lastDump)
+		require.Equal(t, bProj, aProj, "open %d: data stable", i+1)
 	}
 	EvidenceNote(t, ev, "verdict.txt", "T-MIG-06 PASS: five opens, bookkeeping stays 2/non-dirty, data stable across all five\n")
 }
@@ -726,7 +794,8 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	require.True(t, dirty, "the killed migration left dirty=1 (got version=%d dirty=%v)", v, dirty)
 	_ = v
 	killedDump := tableSnapshot(t, dbprocBin, crashPath, filepath.Join(dir, "killed.json"), "")
-	assert.Equal(t, normalizeDump(before), normalizeDump(killedDump), "the 0001 data survived the mid-migration kill untouched")
+	bb, aa := project0001(before, killedDump)
+	assert.Equal(t, bb, aa, "the 0001 data survived the mid-migration kill untouched")
 
 	// Fail-closed restart: exits non-zero BEFORE binding, with the one-line
 	// C-SCHEMA-19 message naming the version and the recovery command.

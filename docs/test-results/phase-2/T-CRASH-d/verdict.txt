@@ -1,0 +1,1 @@
+T-CRASH-d PASS (MP): external watcher + controller SIGKILL mid-migration; dirty=1; restart fails closed (exit!=0, C-SCHEMA-19 line, no listener); operator force completes it to a dump-identical clean state. FINDING: per-statement landmarks k=11/14/19 unobservable — the vendored driver tx-wraps the whole file (see landmarks.json).

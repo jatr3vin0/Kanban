@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_MEM_01$' -count=1 -v  (MP: two worker processes, one file, 6 rows)

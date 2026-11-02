@@ -1,0 +1,13 @@
+{
+  "dirty_after": false,
+  "fail_closed_exit": 1,
+  "version_after": 2,
+  "watcher": {
+    "ok": true,
+    "op": "wait_schema",
+    "saw_landmarks": [
+      "dirty"
+    ],
+    "waited_ms": 1
+  }
+}

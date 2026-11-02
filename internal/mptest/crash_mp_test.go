@@ -21,13 +21,13 @@ import (
 
 // crashAgent spawns an agent child with an armed crashpoint and returns it
 // together with the FIFO the marker will arrive on.
-func crashAgent(t *testing.T, agentBin, fifoDir string, point string, env []string) (*barrierAgent, string) {
+func crashAgent(t *testing.T, agentBin, fifoDir string, point string, env []string) (*Child, string) {
 	fifo := MakeFIFO(t, fifoDir, fmt.Sprintf("crash-%d", fifoSeq.Add(1)))
 	e := append(env,
 		"LEDGERBOARD_CRASH_POINTS="+point,
 		"LEDGERBOARD_CRASH_FIFO="+fifo,
 	)
-	return startBarrier(t, agentBin, fifoDir, e), fifo
+	return StartAgent(t, agentBin, e...), fifo
 }
 
 // TestMP_T_CRASH_A is row T-CRASH-a: kill at claim.pre_commit and at
@@ -55,14 +55,14 @@ func TestMP_T_CRASH_A(t *testing.T) {
 			s := OpenStore(t, dbPath, clockFile)
 			_, tk := fixtureBoard(t, s, fmt.Sprintf("crash a %s %d", point, i))
 
-			agent, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(), []string{
+			child, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(), []string{
 				"LEDGERBOARD_TEST_OP=claim_idem", "LEDGERBOARD_TEST_DB=" + dbPath,
 				"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 				"LEDGERBOARD_TEST_KEY=ka",
 			}...))
 			marker := ReadFIFO(t, fifo, 30*time.Second)
 			require.Contains(t, marker, "crash "+point, "the kill must be announced on the crash FIFO")
-			_, _ = agent.child.Wait(t)
+			_, _ = child.Wait(t)
 
 			h, a, k := countClaimSurvivors(t, dbPath, tk)
 			record[point] = append(record[point], survivors{h, a, k})
@@ -149,16 +149,16 @@ func TestMP_T_CRASH_B(t *testing.T) {
 			ct, err := s.Claim(t.Context(), modelsClaimReq(tk, "agent:builder-1"))
 			require.NoError(t, err)
 
-			var agent *barrierAgent
+			var child *Child
 			if point == "unarmed" {
-				agent = startBarrier(t, agentBin, dir, handoffEnv(dbPath, tk, ct.Claim.Generation, ct.Version))
+				child = StartAgent(t, agentBin, handoffEnv(dbPath, tk, ct.Claim.Generation, ct.Version)...)
 			} else {
-				a, fifo := crashAgent(t, agentBin, dir, point, handoffEnv(dbPath, tk, ct.Claim.Generation, ct.Version))
-				agent = a
+				var fifo string
+				child, fifo = crashAgent(t, agentBin, dir, point, handoffEnv(dbPath, tk, ct.Claim.Generation, ct.Version))
 				marker := ReadFIFO(t, fifo, 30*time.Second)
 				require.Contains(t, marker, "crash "+point)
 			}
-			_, _ = agent.child.Wait(t)
+			_, _ = child.Wait(t)
 			c := counts(t, dbPath)
 			results[point] = append(results[point], c)
 
@@ -224,14 +224,14 @@ func TestMP_T_CRASH_E(t *testing.T) {
 			// The renewal happens 30 s later on the fake clock (still inside
 			// the original window, TTL=15 min).
 			WriteClockMS(t, clockFile, base+30000)
-			agent, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(), []string{
+			child, fifo := crashAgent(t, agentBin, dir, point, append(agentBase(), []string{
 				"LEDGERBOARD_TEST_OP=renew", "LEDGERBOARD_TEST_DB=" + dbPath,
 				"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 				fmt.Sprintf("LEDGERBOARD_TEST_GEN=%d", ct.Claim.Generation),
 			}...))
 			marker := ReadFIFO(t, fifo, 30*time.Second)
 			require.Contains(t, marker, "crash "+point)
-			_, _ = agent.child.Wait(t)
+			_, _ = child.Wait(t)
 
 			pdb := ParentDB(t, dbPath)
 			expiry, _ := pdb.IntOrNull(t, `SELECT lease_expires_at FROM tickets WHERE id=?`, tk)

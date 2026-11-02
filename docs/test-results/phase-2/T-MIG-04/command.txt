@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_MIG_04$' -count=1 -v  (down round trip on the populated fixture)

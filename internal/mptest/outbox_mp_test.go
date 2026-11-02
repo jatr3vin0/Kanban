@@ -98,7 +98,7 @@ func TestMP_T_MEM_01(t *testing.T) {
 		assert.Equal(t, 1, n, "write id %s delivered more than once", id)
 	}
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"worker_a": r1, "worker_b": r2, "calls": callLines,
-		"lease_owners": pdb.strs(t, `SELECT DISTINCT lease_owner FROM outbox`)}))
+		"lease_owners": pdb.strs(t, `SELECT DISTINCT COALESCE(lease_owner,'<unclaimed>') FROM outbox`)}))
 	EvidenceNote(t, ev, "verdict.txt", "T-MEM-01 PASS (MP): 2 worker processes drained 6 rows, exactly-once, attempts=1, 6 audits, no double delivery\n")
 }
 
@@ -187,7 +187,7 @@ func TestMP_T_MEM_06(t *testing.T) {
 	}...))
 	marker := ReadFIFO(t, fifo, 30*time.Second)
 	require.Contains(t, marker, "crash memory.post_adapter_write")
-	_, _ = a.child.Wait(t)
+	_, _ = a.Wait(t)
 
 	pdb := ParentDB(t, dbPath)
 	assert.Equal(t, "processing", pdb.Str(t, `SELECT status FROM outbox`), "the row is stuck in processing")
@@ -230,7 +230,7 @@ func TestMP_T_MEM_06(t *testing.T) {
 	assert.Equal(t, callLines[0]["external_id"], callLines[1]["external_id"], "the far end dedups to one external id")
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM ticket_events WHERE type='memory_delivered'`), "exactly one delivered audit")
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"crash_marker": marker, "reclaim": rec, "worker_b": bres, "calls": callLines,
-		"lease_owners": pdb.strs(t, `SELECT DISTINCT lease_owner FROM outbox`)}))
+		"lease_owners": pdb.strs(t, `SELECT DISTINCT COALESCE(lease_owner,'<unclaimed>') FROM outbox`)}))
 	EvidenceNote(t, ev, "verdict.txt", "T-MEM-06 PASS (MP): killed worker A mid-attempt -> processing -> clock past 60s -> worker B reclaims to uncertain FIRST (no external id) -> delivers with the same write id; far end deduped\n")
 }
 
@@ -258,7 +258,7 @@ func TestMP_T_CRASH_C(t *testing.T) {
 		}...))
 		marker := ReadFIFO(t, fifo, 30*time.Second)
 		require.Contains(t, marker, "crash "+point)
-		_, _ = a.child.Wait(t)
+		_, _ = a.Wait(t)
 
 		pdb := ParentDB(t, dbPath)
 		require.Equal(t, "processing", pdb.Str(t, `SELECT status FROM outbox`))

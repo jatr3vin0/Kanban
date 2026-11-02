@@ -1,0 +1,8 @@
+controller SIGKILL pid=11744 state=signal: killed
+creator result: {
+  "generation": 1,
+  "handoff_id": "18b1ae51c4484fc7a64f22ee8d1dcbc9",
+  "ok": true,
+  "op": "handoff_create_signal",
+  "ticket_id": "415ed3fcf4254d20a45e0023d34daecb"
+}

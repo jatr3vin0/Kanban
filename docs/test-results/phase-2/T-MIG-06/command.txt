@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_MIG_06$' -count=1 -v  (5x open/migrate loop)

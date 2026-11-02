@@ -1,0 +1,9 @@
+Procedure (skill: crashpoint-falsifiability-check):
+  tar-copy the working tree to /tmp/negctl, replace the SIGKILL in
+  internal/crashpoint/crashpoint.go fire() with a plain return, run the
+  crash rows there, read which assertions fail, delete the copy.
+Expected: every 'nothing survives' assertion FAILS with the staged rows
+(expected 0 / actual N) — proving the SIGKILL, not the absence of writes,
+produces the zero. For T-CRASH-c the falsified run shows attempts=1 and
+one calls.jsonl line (the ack commits) instead of the crash leg's 2.
+Result: recorded in negctl-output.txt; the copy was deleted afterwards.

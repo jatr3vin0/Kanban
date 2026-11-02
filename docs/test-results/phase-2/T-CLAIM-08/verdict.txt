@@ -1,0 +1,1 @@
+T-CLAIM-08(ii) MP PASS: lapsed renew loses with a diagnosis, claim wins, generation 1->2, invariants hold

@@ -147,7 +147,7 @@ func TestMP_T_CLAIM_16(t *testing.T) {
 		assert.LessOrEqual(t, num(res, "elapsed_ms"), int64(8000), "and it must give up promptly after")
 		pdb := ParentDB(t, dbPath)
 		assert.Equal(t, int64(0), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder IS NOT NULL`, tk))
-		assert.Equal(t, int64(0), pdb.Int(t, `SELECT COUNT(*) FROM ticket_events WHERE ticket_id=?`, tk))
+		assert.Equal(t, int64(0), pdb.Int(t, `SELECT COUNT(*) FROM ticket_events WHERE ticket_id=? AND type='claimed'`, tk), "a busy-failed claim must not write an audit row (the fixture's `created` event is baseline)")
 		SaveEvidence(t, ev, "exceed.json", DumpJSON(res))
 	})
 
@@ -204,7 +204,9 @@ func TestMP_T_CLAIM_08_EXPIRY_RACE(t *testing.T) {
 		"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:lapsed-holder",
 		fmt.Sprintf("LEDGERBOARD_TEST_GEN=%d", ct.Claim.Generation),
 	}...))
-	claimer := startBarrier(t, agentBin, dir, append(agentBase(), claimEnv(dbPath, tk, "agent:new-claimant")...))
+	claimer := startBarrier(t, agentBin, dir, append(agentBase(), append(
+		claimEnv(dbPath, tk, "agent:new-claimant"),
+		"LEDGERBOARD_CLOCK=fake", "LEDGERBOARD_CLOCK_FILE="+clockFile)...))
 	waitReady(t, []*barrierAgent{renewer, claimer})
 	releaseBarrier(t, []*barrierAgent{renewer, claimer})
 	results := collect(t, []*Child{renewer.child, claimer.child}, 60*time.Second)
@@ -253,23 +255,23 @@ func TestMP_T_FENCING(t *testing.T) {
 	// Step 2: the same actor re-claims from yet another process -> generation 2.
 	recl := run(claimEnv(dbPath, tk, "agent:builder-1"))
 	require.True(t, okOf(recl), "re-claim: %v", recl)
-	require.Equal(t, int64(2), num(recl, "generation"))
+	require.Equal(t, int64(3), num(recl, "generation"), "release bumped 1->2 (T3, C-FENCE-11), the re-claim issues 3")
 	// Step 3: the stale process (still holding generation 1) renews — rejected.
 	stale := run([]string{"LEDGERBOARD_TEST_OP=renew", "LEDGERBOARD_TEST_DB=" + dbPath,
 		"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1", "LEDGERBOARD_TEST_GEN=1"})
 	assert.False(t, okOf(stale), "the superseded generation must be rejected")
 	assert.Equal(t, "lease_generation_mismatch", codeOf(stale), "%v", stale)
 	assert.Equal(t, int64(1), num(detailOf(stale), "expected_generation"), "details carry the expected generation")
-	assert.Equal(t, int64(2), num(detailOf(stale), "current_generation"))
+	assert.Equal(t, int64(3), num(detailOf(stale), "current_generation"))
 	// Step 4: a foreign agent's claim on the live lease — already_claimed with
 	// the holder's CURRENT details (never the stale generation).
 	foreign := run(claimEnv(dbPath, tk, "agent:builder-2"))
 	assert.False(t, okOf(foreign))
 	assert.Equal(t, "already_claimed", codeOf(foreign))
-	assert.Equal(t, int64(2), num(detailOf(foreign), "lease_generation"), "details carry the CURRENT generation")
+	assert.Equal(t, int64(3), num(detailOf(foreign), "lease_generation"), "details carry the CURRENT generation")
 
 	pdb := ParentDB(t, dbPath)
-	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='agent:builder-1' AND lease_generation=2`, tk))
+	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='agent:builder-1' AND lease_generation=3`, tk))
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"release": rel, "reclaim": recl, "stale_renew": stale, "foreign_claim": foreign}))
 	EvidenceNote(t, ev, "verdict.txt", "FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details\n")
 }

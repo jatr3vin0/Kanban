@@ -1,0 +1,1 @@
+go test ./internal/mptest -run '^TestMP_T_FENCING$' -count=1 -v  (MP row: fencing across four processes, generation 1 -> 2)

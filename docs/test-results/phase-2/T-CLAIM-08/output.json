@@ -1,0 +1,28 @@
+[
+  {
+    "generation": 1,
+    "lease_expires_at_ms": 1793578157149,
+    "ok": true,
+    "op": "renew",
+    "ticket_id": "2f2f956c0f6e425fb8867e521b142e65",
+    "version": 2
+  },
+  {
+    "details": {
+      "holder": "lapsed-holder",
+      "holder_type": "agent",
+      "lease_expires_at": 1793578157149,
+      "lease_generation": 1,
+      "reason": "lease_active",
+      "status": "in_progress",
+      "ticket_id": "2f2f956c0f6e425fb8867e521b142e65",
+      "version": 2
+    },
+    "elapsed_ms": 1,
+    "err_message": "ticket 2f2f956c0f6e425fb8867e521b142e65 is held by lapsed-holder until 2026-11-02T00:09:17.149Z",
+    "error_code": "already_claimed",
+    "ok": false,
+    "op": "claim",
+    "ticket_id": "2f2f956c0f6e425fb8867e521b142e65"
+  }
+]

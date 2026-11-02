@@ -1,0 +1,26 @@
+{
+  "processes_ok": 4,
+  "results": [
+    {
+      "ok": true,
+      "op": "burst",
+      "rows_affected": 10
+    },
+    {
+      "ok": true,
+      "op": "burst",
+      "rows_affected": 10
+    },
+    {
+      "ok": true,
+      "op": "burst",
+      "rows_affected": 10
+    },
+    {
+      "ok": true,
+      "op": "burst",
+      "rows_affected": 10
+    }
+  ],
+  "writes_each": 10
+}

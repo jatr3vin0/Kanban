@@ -1,0 +1,2 @@
+durable handoff row: 18b1ae51c4484fc7a64f22ee8d1dcbc9|offered|handoff created by harness-agent|agent:builder-1
+reported by killed creator: 18b1ae51c4484fc7a64f22ee8d1dcbc9
