@@ -772,27 +772,37 @@ func TestMP_T_MIG_06(t *testing.T) {
 }
 
 // TestMP_T_CRASH_D is row T-CRASH-d: crash DURING migration, from a copy of
-// the populated fixture. An external harness-dbproc watcher observes the
-// migration's committed DDL landmarks; the controller SIGKILLs the migrating
-// server at the dirty boundary (the migration transaction is running). On
-// restart the server must fail closed (C-SCHEMA-19): exit non-zero, the
-// one-line recovery message naming the version, no listener. Only the explicit
-// operator force completes the migration; the end state must equal the clean
-// migration of T-MIG-02.
+// the populated fixture, at the two boundaries that actually exist for the
+// vendored runner (finding A12, accepted by the design review §1.4). The
+// golang-migrate v4.19.1 sqlite driver tx-wraps the WHOLE migration file in
+// one Begin/Exec/Commit (database/sqlite/sqlite.go executeQuery), so SQLite
+// DDL never shows per-statement committed state — the §4.3 per-statement
+// landmarks of the original plan do not exist (empirical proof: landmarks.json
+// saw one observation). The row instead verifies:
 //
-// MP finding recorded in the evidence: the vendored golang-migrate v4.19.1
-// sqlite driver wraps the WHOLE migration file in one transaction
-// (database/sqlite/sqlite.go executeQuery -> Begin/Exec/Commit), so the
-// per-statement landmarks of plan §4.3 (k=11/14/19 individually observable)
-// do not exist — the watcher's SawLandmarks list is the empirical proof: all
-// DDL landmarks appear in one observation. The two boundaries that DO exist
-// are the dirty flag (before any DDL) and the DDL-complete-with-dirty window.
+//   - B1 (the kill): the migrating server is SIGKILLed at the dirty boundary —
+//     an external harness-dbproc watcher observes schema_migrations.dirty=1
+//     from a separate process, and the controller (this test) issues the kill.
+//     Restart must fail closed (C-SCHEMA-19): exit non-zero before the
+//     listener binds, the one-line message naming the version and the remedy,
+//     probe refused. Recovery: operator `force 1` (B1's target: 0002 has not
+//     applied), restart, migration completes to a dump-identical clean state.
+//   - B2 (the constructed state): the window between the migration
+//     transaction's commit and the bookkeeping update cannot be hit by an
+//     external poller (microseconds, same process) — so it is CONSTRUCTED, not
+//     raced: a clean-migrated copy gets schema_migrations.dirty=1 by direct
+//     SQL through harness-dbproc. The identical fail-closed contract applies;
+//     recovery is `force 2` (B2's target: the DDL is already on disk), and the
+//     end state is again dump-identical to the clean migration.
+//
+// B1 is the row's only kill point; B2 is a state, deterministically set. Both
+// record which boundary was reached in recovery.json.
 func TestMP_T_CRASH_D(t *testing.T) {
 	if testing.Short() {
 		t.Skip("fixture build is expensive")
 	}
 	dir := TestDir(t, "T-CRASH-d")
-	ev := EvidenceDir(t, "T-CRASH-d", "go test ./internal/mptest -run '^TestMP_T_CRASH_D$' -count=1 -v  (kill during migration, fail-closed restart, force recovery)")
+	ev := EvidenceDir(t, "T-CRASH-d", "go test ./internal/mptest -run '^TestMP_T_CRASH_D$' -count=1 -v  (B1: kill at the dirty boundary + force 1; B2: constructed dirty state + force 2)")
 	dbprocBin := BuildOnce(t, "internal/harness/dbproc", "harness-dbproc")
 	serverBin := ServerBin(t)
 	fixturePath, before := fixtureOnce(t)
@@ -803,12 +813,14 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	cleanDump := tableSnapshot(t, dbprocBin, cleanPath, filepath.Join(dir, "clean.json"), "")
 	allowlist := masterObjects(t, dbprocBin, cleanPath)
 
+	// ---- B1: the dirty-boundary kill ---------------------------------------
 	crashPath := filepath.Join(dir, "crashed.db")
 	copyFixture(t, fixturePath, crashPath)
 
 	// The watcher: a separate process polling the schema until the dirty flag
 	// is visible. Its SawLandmarks list records which landmarks were reached
-	// and in which observation — the §4.3 landmark evidence.
+	// and in which observation — the A12 evidence that per-statement landmarks
+	// are not observable (all DDL appears in one observation or not at all).
 	watcher := StartDBProc(t, dbprocBin,
 		"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=wait_schema",
 		"LEDGERBOARD_TEST_DB="+crashPath,
@@ -834,14 +846,13 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	SaveEvidence(t, ev, "migrating-server-log.txt", migLog.String())
 	SaveEvidence(t, ev, "landmarks.json", DumpJSON(map[string]any{
 		"saw_landmarks": saw,
-		"note":          "The landmarks appear together in one observation: the vendored driver commits the whole migration file as ONE transaction, so per-statement landmarks (k=11/14/19) are not observable. The observable boundaries are: dirty visible (before/inside the migration transaction) and DDL-complete-with-dirty.",
+		"note":          "A12 finding (accepted): the landmarks appear together in one observation — the vendored driver commits the whole migration file as ONE transaction, so per-statement landmarks (k=1..20) are not observable. The observable boundaries are the dirty window (B1, killed here) and DDL-complete-with-dirty (B2, constructed below); §4.3 was amended accordingly.",
 	}))
 
 	// Post-kill state: the dirty flag is set, the 0001 data is intact.
 	v, dirty, hasV := migrationsState(t, dbprocBin, crashPath)
 	require.True(t, hasV, "bookkeeping row exists")
 	require.True(t, dirty, "the killed migration left dirty=1 (got version=%d dirty=%v)", v, dirty)
-	_ = v
 	killedDump := tableSnapshot(t, dbprocBin, crashPath, filepath.Join(dir, "killed.json"), "")
 	bb, aa := project0001(t, before, killedDump)
 	assert.Equal(t, bb, aa, "the 0001 data survived the mid-migration kill untouched")
@@ -857,15 +868,16 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	if conn != nil {
 		_ = conn.Close()
 	}
-	SaveEvidence(t, ev, "failclosed.txt", fmt.Sprintf("exit=%d\noutput:\n%s\n", code, out))
+	SaveEvidence(t, ev, "failclosed.txt", fmt.Sprintf("B1 exit=%d\noutput:\n%s\n", code, out))
 
-	// Operator recovery: force to version 1, restart, migration completes.
+	// Operator recovery at B1: force to version 1 (0002 has not applied here —
+	// force 2 would re-run an applied file), restart, migration completes.
 	f := StartDBProc(t, dbprocBin,
 		"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=force",
 		"LEDGERBOARD_TEST_DB="+crashPath, "LEDGERBOARD_TEST_FORCE_VERSION=1")
 	fres := f.Line(t, 30*time.Second)
 	_, _ = f.Wait(t)
-	require.True(t, okOf(fres), "force: %v", fres)
+	require.True(t, okOf(fres), "force 1: %v", fres)
 
 	port2 := nextPort()
 	StartServer(t, serverBin, crashPath, port2)
@@ -874,10 +886,71 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	assert.False(t, dirty2, "the recovery completes the migration")
 	assert.Equal(t, allowlist, masterObjects(t, dbprocBin, crashPath), "recovered schema equals the clean migration")
 	recoveredDump := tableSnapshot(t, dbprocBin, crashPath, filepath.Join(dir, "recovered.json"), "")
-	assert.Equal(t, normalizeDump(t, cleanDump), normalizeDump(t, recoveredDump), "recovered end state is dump-identical to the clean migration of T-MIG-02")
+	assert.Equal(t, normalizeDump(t, cleanDump), normalizeDump(t, recoveredDump), "B1 recovered end state is dump-identical to the clean migration of T-MIG-02")
 	assert.Empty(t, fkViolations(t, dbprocBin, crashPath))
 	pdb := ParentDB(t, crashPath)
-	assert.Equal(t, int64(40), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE version=1 AND lease_generation=0`), "pre-existing rows carry the defaults after recovery")
-	SaveEvidence(t, ev, "recovery.json", DumpJSON(map[string]any{"watcher": wres, "fail_closed_exit": code, "version_after": v2, "dirty_after": dirty2}))
-	VerdictNote(t, ev, "T-CRASH-d PASS (MP): external watcher + controller SIGKILL mid-migration; dirty=1; restart fails closed (exit!=0, C-SCHEMA-19 line, no listener); operator force completes it to a dump-identical clean state. FINDING: per-statement landmarks k=11/14/19 unobservable — the vendored driver tx-wraps the whole file (see landmarks.json).\n")
+	assert.Equal(t, int64(40), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE version=1 AND lease_generation=0`), "pre-existing rows carry the defaults after B1 recovery")
+
+	// ---- B2: the constructed dirty state -----------------------------------
+	// The DDL-complete-with-dirty window lives for microseconds inside the
+	// migrating process (review §1.4: an external poller would hit it ~1 time
+	// in 20 — a flake generator). B2 is a STATE, so construct it deterministi-
+	// cally: clean-migrate a fresh copy, then set dirty=1 by direct SQL through
+	// harness-dbproc (the operator CLI's own access path, production DSN).
+	b2Path := filepath.Join(dir, "b2-dirty.db")
+	copyFixture(t, fixturePath, b2Path)
+	migrateWithProduct(t, serverBin, b2Path)
+	vb, dirtyb, _ := migrationsState(t, dbprocBin, b2Path)
+	require.Equal(t, int64(2), vb)
+	require.False(t, dirtyb, "B2 starts from a CLEAN migration")
+
+	s := StartDBProc(t, dbprocBin,
+		"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=sql",
+		"LEDGERBOARD_TEST_DB="+b2Path,
+		"LEDGERBOARD_TEST_SQL=UPDATE schema_migrations SET dirty = 1")
+	sres := s.Line(t, 30*time.Second)
+	_, _ = s.Wait(t)
+	require.True(t, okOf(sres), "set dirty=1: %v", sres)
+	_, dirtyAfter, _ := migrationsState(t, dbprocBin, b2Path)
+	require.True(t, dirtyAfter, "B2 constructed: DDL complete, bookkeeping dirty")
+
+	// The identical fail-closed contract at B2.
+	code2, out2 := StartServerExpectExit(t, serverBin, b2Path, nextPort())
+	assert.NotEqual(t, 0, code2, "B2: the dirty database must fail closed")
+	assert.Contains(t, out2, "C-SCHEMA-19", "B2: the one-line message names the rule")
+	assert.Contains(t, out2, "force", "B2: and names the recovery command")
+	conn2, dialErr2 := dialPort(port2)
+	assert.Error(t, dialErr2, "B2: no listener: a probe call is refused")
+	if conn2 != nil {
+		_ = conn2.Close()
+	}
+	SaveEvidence(t, ev, "failclosed-b2.txt", fmt.Sprintf("B2 exit=%d\noutput:\n%s\n", code2, out2))
+
+	// Operator recovery at B2: force to version 2 — the DDL is ALREADY on disk
+	// (force 1 here would tell the runner 0002 is unapplied and the restart
+	// would fail on `duplicate column name`). Then the restart is a no-op.
+	f2 := StartDBProc(t, dbprocBin,
+		"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=force",
+		"LEDGERBOARD_TEST_DB="+b2Path, "LEDGERBOARD_TEST_FORCE_VERSION=2")
+	fres2 := f2.Line(t, 30*time.Second)
+	_, _ = f2.Wait(t)
+	require.True(t, okOf(fres2), "force 2: %v", fres2)
+
+	StartServer(t, serverBin, b2Path, nextPort())
+	vb2, dirtyb2, _ := migrationsState(t, dbprocBin, b2Path)
+	assert.Equal(t, int64(2), vb2)
+	assert.False(t, dirtyb2, "B2 recovery lands on a healthy file")
+	assert.Equal(t, allowlist, masterObjects(t, dbprocBin, b2Path), "B2 recovered schema equals the clean migration")
+	b2Dump := tableSnapshot(t, dbprocBin, b2Path, filepath.Join(dir, "b2-recovered.json"), "")
+	assert.Equal(t, normalizeDump(t, cleanDump), normalizeDump(t, b2Dump), "B2 recovered end state is dump-identical to the clean migration of T-MIG-02")
+	assert.Empty(t, fkViolations(t, dbprocBin, b2Path))
+	pdb2 := ParentDB(t, b2Path)
+	assert.Equal(t, int64(40), pdb2.Int(t, `SELECT COUNT(*) FROM tickets WHERE version=1 AND lease_generation=0`), "pre-existing rows carry the defaults after B2 recovery")
+
+	SaveEvidence(t, ev, "recovery.json", DumpJSON(map[string]any{
+		"b1_dirty_boundary_kill": map[string]any{"watcher": wres, "fail_closed_exit": code, "force": 1, "version_after": v2, "dirty_after": dirty2},
+		"b2_constructed_state":   map[string]any{"fail_closed_exit": code2, "force": 2, "version_after": vb2, "dirty_after": dirtyb2},
+		"boundary_rule":          "B1 is the row's only kill point; B2 is a constructed state (dirty=1 on a clean-migrated copy). B1 recovers by force 1, B2 by force 2.",
+	}))
+	VerdictNote(t, ev, "T-CRASH-d PASS (MP, A12 design): B1 — external watcher + controller SIGKILL at the dirty boundary, dirty=1, restart fails closed (exit!=0, C-SCHEMA-19 line, no listener), force 1 completes it dump-identical to the clean migration. B2 — constructed state (dirty=1 on a clean-migrated copy), same fail-closed contract, force 2 recovers dump-identical. Per-statement landmarks are unobservable (vendored driver tx-wraps the file — landmarks.json); §4.3 amended (finding-A12.md).\n")
 }
