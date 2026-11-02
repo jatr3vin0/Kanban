@@ -1,4 +1,1 @@
-T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state (concurrent starts serialized to a clean migration)
-T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state (concurrent starts serialized to a clean migration)
-T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state (concurrent starts serialized to a clean migration)
-T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state (concurrent starts serialized to a clean migration)
+T-MIG-02 PASS: allowlist schema, defaults on 40 rows, 0001 dumps identical, fk empty, second open no-op; concurrent starts left no torn state (concurrent starts left dirty=1; fail-closed restart + force recovered to the clean state)

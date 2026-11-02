@@ -1,0 +1,1 @@
+C-OUTBOX-17 MP PASS: 1 due row, 2 processes, exactly 1 claim, the other reports nothing claimable (C-OUTBOX-5 supports second-process safety)

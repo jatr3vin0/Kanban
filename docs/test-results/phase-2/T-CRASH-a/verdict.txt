@@ -1,4 +1,1 @@
 T-CRASH-a PASS (MP): 20x pre-commit -> nothing survives, retry re-executes; 20x post-commit -> claim+audit+key survive, retry replays; claim-without-audit never observed
-T-CRASH-a PASS (MP): 20x pre-commit -> nothing survives, retry re-executes; 20x post-commit -> claim+audit+key survive, retry replays; claim-without-audit never observed
-T-CRASH-a PASS (MP): 20x pre-commit -> nothing survives, retry re-executes; 20x post-commit -> claim+audit+key survive, retry replays; claim-without-audit never observed
-T-CRASH-a PASS (MP): 20x pre-commit -> nothing survives, retry re-executes; 20x post-commit -> claim+audit+key survive, retry replays; claim-without-audit never observed

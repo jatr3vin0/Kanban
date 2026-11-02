@@ -1,6 +1,6 @@
 {
-  "dirty": false,
-  "note": "concurrent starts serialized to a clean migration",
+  "dirty": true,
+  "note": "concurrent starts left dirty=1; fail-closed restart + force recovered to the clean state",
   "outcomes": [
     {},
     {},

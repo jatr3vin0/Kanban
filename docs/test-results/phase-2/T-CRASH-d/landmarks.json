@@ -1,5 +1,5 @@
 {
-  "note": "The landmarks appear together in one observation: the vendored driver commits the whole migration file as ONE transaction, so per-statement landmarks (k=11/14/19) are not observable. The observable boundaries are: dirty visible (before/inside the migration transaction) and DDL-complete-with-dirty.",
+  "note": "A12 finding (accepted): the landmarks appear together in one observation — the vendored driver commits the whole migration file as ONE transaction, so per-statement landmarks (k=1..20) are not observable. The observable boundaries are the dirty window (B1, killed here) and DDL-complete-with-dirty (B2, constructed below); §4.3 was amended accordingly.",
   "saw_landmarks": [
     "dirty"
   ]

@@ -1,3 +1,1 @@
 T-MEM-01 PASS (MP): 2 worker processes drained 6 rows, exactly-once, attempts=1, 6 audits, no double delivery
-T-MEM-01 PASS (MP): 2 worker processes drained 6 rows, exactly-once, attempts=1, 6 audits, no double delivery
-T-MEM-01 PASS (MP): 2 worker processes drained 6 rows, exactly-once, attempts=1, 6 audits, no double delivery

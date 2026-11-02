@@ -1,0 +1,1 @@
+T-MIG-04 PASS: down to 11 columns (indexes first), fk empty, 0001 data survives both directions, defaults re-applied by re-up

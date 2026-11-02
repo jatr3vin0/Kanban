@@ -1,5 +1,1 @@
 T-CLAIM-01 PASS (MP): 8 processes, exactly 1 winner, 7 already_claimed with C-ERR-4 details, 1 audit row
-T-CLAIM-01 PASS (MP): 8 processes, exactly 1 winner, 7 already_claimed with C-ERR-4 details, 1 audit row
-T-CLAIM-01 PASS (MP): 8 processes, exactly 1 winner, 7 already_claimed with C-ERR-4 details, 1 audit row
-T-CLAIM-01 PASS (MP): 8 processes, exactly 1 winner, 7 already_claimed with C-ERR-4 details, 1 audit row
-T-CLAIM-01 PASS (MP): 8 processes, exactly 1 winner, 7 already_claimed with C-ERR-4 details, 1 audit row
