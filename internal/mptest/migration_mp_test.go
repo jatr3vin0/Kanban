@@ -671,6 +671,18 @@ func TestMP_T_MIG_04(t *testing.T) {
 	bProj, aProj = project0001(t, before, downDump)
 	assert.Equal(t, bProj, aProj, "0001 data survives the down migration")
 
+	// The contracted down text touches schema objects only; the bookkeeping
+	// row still claims version 2 — so a re-open would be a golang-migrate
+	// no-op and the defaults below would be asserted against a table without
+	// its lease columns (observed run 5). Step the bookkeeping down the way
+	// golang-migrate's Down() would: the operator recovery path, force 1.
+	fdown := StartDBProc(t, dbprocBin,
+		"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=force",
+		"LEDGERBOARD_TEST_DB="+migPath, "LEDGERBOARD_TEST_FORCE_VERSION=1")
+	fdownRes := fdown.Line(t, 30*time.Second)
+	_, _ = fdown.Wait(t)
+	require.True(t, okOf(fdownRes), "down-step bookkeeping to version 1: %v", fdownRes)
+
 	// Up again: defaults re-applied, data still identical.
 	migrateWithProduct(t, serverBin, migPath)
 	v, dirty, hasV := migrationsState(t, dbprocBin, migPath)
