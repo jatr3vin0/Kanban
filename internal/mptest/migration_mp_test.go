@@ -65,6 +65,7 @@ func upstreamBin(t *testing.T) string {
 		require.NoError(t, err, "git %v: %s", args, b)
 		return b
 	}
+	git("worktree", "prune") // a stale registration from an interrupted run makes `worktree add` fail (observed run 4/5: T-MIG-04 at 0.3s)
 	git("worktree", "add", "--detach", wt, UpstreamPin)
 	t.Cleanup(func() {
 		_ = exec.Command("git", "-C", RepoRoot(t), "worktree", "remove", "--force", wt).Run()
@@ -914,12 +915,15 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	_, dirtyAfter, _ := migrationsState(t, dbprocBin, b2Path)
 	require.True(t, dirtyAfter, "B2 constructed: DDL complete, bookkeeping dirty")
 
-	// The identical fail-closed contract at B2.
-	code2, out2 := StartServerExpectExit(t, serverBin, b2Path, nextPort())
+	// The identical fail-closed contract at B2. The probe dials the port the
+	// fail-closed start was GIVEN (not any earlier leg's port — B1's recovered
+	// server is still listening on its own port at this point).
+	probePort := nextPort()
+	code2, out2 := StartServerExpectExit(t, serverBin, b2Path, probePort)
 	assert.NotEqual(t, 0, code2, "B2: the dirty database must fail closed")
 	assert.Contains(t, out2, "C-SCHEMA-19", "B2: the one-line message names the rule")
 	assert.Contains(t, out2, "force", "B2: and names the recovery command")
-	conn2, dialErr2 := dialPort(port2)
+	conn2, dialErr2 := dialPort(probePort)
 	assert.Error(t, dialErr2, "B2: no listener: a probe call is refused")
 	if conn2 != nil {
 		_ = conn2.Close()
