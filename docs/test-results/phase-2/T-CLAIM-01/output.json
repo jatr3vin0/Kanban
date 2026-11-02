@@ -1,138 +1,138 @@
 [
   {
     "details": {
-      "holder": "claimant-2",
+      "holder": "claimant-1",
       "holder_type": "agent",
-      "lease_expires_at": 1793578149344,
+      "lease_expires_at": 1793581811681,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
+      "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
       "version": 2
     },
-    "elapsed_ms": 3,
-    "err_message": "ticket a370dc612cdd4a92b4150077ab1a5a72 is held by claimant-2 until 2026-11-02T00:09:09.344Z",
+    "elapsed_ms": 1,
+    "err_message": "ticket d64006c275f64441b86dccbe42a0ab06 is held by claimant-1 until 2026-11-02T01:10:11.681Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72"
-  },
-  {
-    "details": {
-      "holder": "claimant-2",
-      "holder_type": "agent",
-      "lease_expires_at": 1793578149344,
-      "lease_generation": 1,
-      "reason": "lease_active",
-      "status": "in_progress",
-      "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
-      "version": 2
-    },
-    "elapsed_ms": 34,
-    "err_message": "ticket a370dc612cdd4a92b4150077ab1a5a72 is held by claimant-2 until 2026-11-02T00:09:09.344Z",
-    "error_code": "already_claimed",
-    "ok": false,
-    "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72"
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06"
   },
   {
     "elapsed_ms": 1,
     "generation": 1,
-    "holder": "claimant-2",
-    "lease_expires_at_ms": 1793578149344,
+    "holder": "claimant-1",
+    "lease_expires_at_ms": 1793581811681,
     "ok": true,
     "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
     "version": 2
   },
   {
     "details": {
-      "holder": "claimant-2",
+      "holder": "claimant-1",
       "holder_type": "agent",
-      "lease_expires_at": 1793578149344,
+      "lease_expires_at": 1793581811681,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
-      "version": 2
-    },
-    "elapsed_ms": 53,
-    "err_message": "ticket a370dc612cdd4a92b4150077ab1a5a72 is held by claimant-2 until 2026-11-02T00:09:09.344Z",
-    "error_code": "already_claimed",
-    "ok": false,
-    "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72"
-  },
-  {
-    "details": {
-      "holder": "claimant-2",
-      "holder_type": "agent",
-      "lease_expires_at": 1793578149344,
-      "lease_generation": 1,
-      "reason": "lease_active",
-      "status": "in_progress",
-      "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
-      "version": 2
-    },
-    "elapsed_ms": 1,
-    "err_message": "ticket a370dc612cdd4a92b4150077ab1a5a72 is held by claimant-2 until 2026-11-02T00:09:09.344Z",
-    "error_code": "already_claimed",
-    "ok": false,
-    "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72"
-  },
-  {
-    "details": {
-      "holder": "claimant-2",
-      "holder_type": "agent",
-      "lease_expires_at": 1793578149344,
-      "lease_generation": 1,
-      "reason": "lease_active",
-      "status": "in_progress",
-      "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
-      "version": 2
-    },
-    "elapsed_ms": 3,
-    "err_message": "ticket a370dc612cdd4a92b4150077ab1a5a72 is held by claimant-2 until 2026-11-02T00:09:09.344Z",
-    "error_code": "already_claimed",
-    "ok": false,
-    "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72"
-  },
-  {
-    "details": {
-      "holder": "claimant-2",
-      "holder_type": "agent",
-      "lease_expires_at": 1793578149344,
-      "lease_generation": 1,
-      "reason": "lease_active",
-      "status": "in_progress",
-      "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
-      "version": 2
-    },
-    "elapsed_ms": 19,
-    "err_message": "ticket a370dc612cdd4a92b4150077ab1a5a72 is held by claimant-2 until 2026-11-02T00:09:09.344Z",
-    "error_code": "already_claimed",
-    "ok": false,
-    "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72"
-  },
-  {
-    "details": {
-      "holder": "claimant-2",
-      "holder_type": "agent",
-      "lease_expires_at": 1793578149344,
-      "lease_generation": 1,
-      "reason": "lease_active",
-      "status": "in_progress",
-      "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72",
+      "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
       "version": 2
     },
     "elapsed_ms": 8,
-    "err_message": "ticket a370dc612cdd4a92b4150077ab1a5a72 is held by claimant-2 until 2026-11-02T00:09:09.344Z",
+    "err_message": "ticket d64006c275f64441b86dccbe42a0ab06 is held by claimant-1 until 2026-11-02T01:10:11.681Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "a370dc612cdd4a92b4150077ab1a5a72"
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06"
+  },
+  {
+    "details": {
+      "holder": "claimant-1",
+      "holder_type": "agent",
+      "lease_expires_at": 1793581811681,
+      "lease_generation": 1,
+      "reason": "lease_active",
+      "status": "in_progress",
+      "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
+      "version": 2
+    },
+    "elapsed_ms": 3,
+    "err_message": "ticket d64006c275f64441b86dccbe42a0ab06 is held by claimant-1 until 2026-11-02T01:10:11.681Z",
+    "error_code": "already_claimed",
+    "ok": false,
+    "op": "claim",
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06"
+  },
+  {
+    "details": {
+      "holder": "claimant-1",
+      "holder_type": "agent",
+      "lease_expires_at": 1793581811681,
+      "lease_generation": 1,
+      "reason": "lease_active",
+      "status": "in_progress",
+      "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
+      "version": 2
+    },
+    "elapsed_ms": 18,
+    "err_message": "ticket d64006c275f64441b86dccbe42a0ab06 is held by claimant-1 until 2026-11-02T01:10:11.681Z",
+    "error_code": "already_claimed",
+    "ok": false,
+    "op": "claim",
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06"
+  },
+  {
+    "details": {
+      "holder": "claimant-1",
+      "holder_type": "agent",
+      "lease_expires_at": 1793581811681,
+      "lease_generation": 1,
+      "reason": "lease_active",
+      "status": "in_progress",
+      "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
+      "version": 2
+    },
+    "elapsed_ms": 3,
+    "err_message": "ticket d64006c275f64441b86dccbe42a0ab06 is held by claimant-1 until 2026-11-02T01:10:11.681Z",
+    "error_code": "already_claimed",
+    "ok": false,
+    "op": "claim",
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06"
+  },
+  {
+    "details": {
+      "holder": "claimant-1",
+      "holder_type": "agent",
+      "lease_expires_at": 1793581811681,
+      "lease_generation": 1,
+      "reason": "lease_active",
+      "status": "in_progress",
+      "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
+      "version": 2
+    },
+    "elapsed_ms": 2,
+    "err_message": "ticket d64006c275f64441b86dccbe42a0ab06 is held by claimant-1 until 2026-11-02T01:10:11.681Z",
+    "error_code": "already_claimed",
+    "ok": false,
+    "op": "claim",
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06"
+  },
+  {
+    "details": {
+      "holder": "claimant-1",
+      "holder_type": "agent",
+      "lease_expires_at": 1793581811681,
+      "lease_generation": 1,
+      "reason": "lease_active",
+      "status": "in_progress",
+      "ticket_id": "d64006c275f64441b86dccbe42a0ab06",
+      "version": 2
+    },
+    "elapsed_ms": 33,
+    "err_message": "ticket d64006c275f64441b86dccbe42a0ab06 is held by claimant-1 until 2026-11-02T01:10:11.681Z",
+    "error_code": "already_claimed",
+    "ok": false,
+    "op": "claim",
+    "ticket_id": "d64006c275f64441b86dccbe42a0ab06"
   }
 ]

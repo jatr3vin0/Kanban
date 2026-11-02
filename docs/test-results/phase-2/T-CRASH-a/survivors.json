@@ -1,0 +1,206 @@
+{
+  "claim.post_commit": [
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    },
+    {
+      "Holder": 1,
+      "Audits": 1,
+      "Keys": 1
+    }
+  ],
+  "claim.pre_commit": [
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    },
+    {
+      "Holder": 0,
+      "Audits": 0,
+      "Keys": 0
+    }
+  ]
+}

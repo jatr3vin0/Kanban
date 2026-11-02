@@ -1,0 +1,5 @@
+FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details
+FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details
+FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details
+FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details
+FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details

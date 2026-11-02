@@ -5,31 +5,15 @@
       "actor_type": "agent",
       "confidence": 0.75,
       "content": "write 2 from builder-1",
-      "created_at": "2026-11-01T23:55:47.214Z",
-      "external_id": "mem_221421eb7faa458195e33ad24f121bdd",
-      "handoff_id": "18b1ae51c4484fc7a64f22ee8d1dcbc9",
-      "id": "221421eb7faa458195e33ad24f121bdd",
+      "created_at": "2026-11-02T00:55:21.287Z",
+      "external_id": "mem_113a0e2bcf0b4c27877f77ac5a831820",
+      "handoff_id": "bbf80d546afd42cd97765dbe3058bb25",
+      "id": "113a0e2bcf0b4c27877f77ac5a831820",
       "op": "write",
       "outcome": "ok",
       "seq": 1,
       "tags": [],
-      "ticket_id": "415ed3fcf4254d20a45e0023d34daecb",
-      "type": "fact"
-    },
-    {
-      "actor": "agent:builder-1",
-      "actor_type": "agent",
-      "confidence": 0.75,
-      "content": "write 1 from builder-1",
-      "created_at": "2026-11-01T23:55:47.214Z",
-      "external_id": "mem_e7d71ca87eab4b4c864233f89fcd7cce",
-      "handoff_id": "18b1ae51c4484fc7a64f22ee8d1dcbc9",
-      "id": "e7d71ca87eab4b4c864233f89fcd7cce",
-      "op": "write",
-      "outcome": "ok",
-      "seq": 2,
-      "tags": [],
-      "ticket_id": "415ed3fcf4254d20a45e0023d34daecb",
+      "ticket_id": "4964f69707e0449896fbea66b5f72596",
       "type": "fact"
     },
     {
@@ -37,31 +21,47 @@
       "actor_type": "agent",
       "confidence": 0.75,
       "content": "write 0 from builder-1",
-      "created_at": "2026-11-01T23:55:47.214Z",
-      "external_id": "mem_f0bab5ae697b4df8a29e8ae5ef3be0a6",
-      "handoff_id": "18b1ae51c4484fc7a64f22ee8d1dcbc9",
-      "id": "f0bab5ae697b4df8a29e8ae5ef3be0a6",
+      "created_at": "2026-11-02T00:55:21.287Z",
+      "external_id": "mem_cfa89324eb2e4c4cbf9f767c2f2a8edd",
+      "handoff_id": "bbf80d546afd42cd97765dbe3058bb25",
+      "id": "cfa89324eb2e4c4cbf9f767c2f2a8edd",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 2,
+      "tags": [],
+      "ticket_id": "4964f69707e0449896fbea66b5f72596",
+      "type": "fact"
+    },
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 1 from builder-1",
+      "created_at": "2026-11-02T00:55:21.287Z",
+      "external_id": "mem_d05bd62bc37d4d958abbfa6f9f5dbd0a",
+      "handoff_id": "bbf80d546afd42cd97765dbe3058bb25",
+      "id": "d05bd62bc37d4d958abbfa6f9f5dbd0a",
       "op": "write",
       "outcome": "ok",
       "seq": 3,
       "tags": [],
-      "ticket_id": "415ed3fcf4254d20a45e0023d34daecb",
+      "ticket_id": "4964f69707e0449896fbea66b5f72596",
       "type": "fact"
     }
   ],
   "contract_order": [
-    "221421eb7faa458195e33ad24f121bdd",
-    "e7d71ca87eab4b4c864233f89fcd7cce",
-    "f0bab5ae697b4df8a29e8ae5ef3be0a6"
+    "113a0e2bcf0b4c27877f77ac5a831820",
+    "cfa89324eb2e4c4cbf9f767c2f2a8edd",
+    "d05bd62bc37d4d958abbfa6f9f5dbd0a"
   ],
   "delivered": [
-    "221421eb7faa458195e33ad24f121bdd",
-    "e7d71ca87eab4b4c864233f89fcd7cce",
-    "f0bab5ae697b4df8a29e8ae5ef3be0a6"
+    "113a0e2bcf0b4c27877f77ac5a831820",
+    "cfa89324eb2e4c4cbf9f767c2f2a8edd",
+    "d05bd62bc37d4d958abbfa6f9f5dbd0a"
   ],
   "worker": {
     "delivered": 3,
-    "elapsed_ms": 2,
+    "elapsed_ms": 1,
     "ok": true,
     "op": "outbox_loop"
   }

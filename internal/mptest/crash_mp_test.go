@@ -228,6 +228,7 @@ func TestMP_T_CRASH_E(t *testing.T) {
 				"LEDGERBOARD_TEST_OP=renew", "LEDGERBOARD_TEST_DB=" + dbPath,
 				"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 				fmt.Sprintf("LEDGERBOARD_TEST_GEN=%d", ct.Claim.Generation),
+				"LEDGERBOARD_CLOCK=fake", "LEDGERBOARD_CLOCK_FILE=" + clockFile,
 			}...))
 			marker := ReadFIFO(t, fifo, 30*time.Second)
 			require.Contains(t, marker, "crash "+point)
@@ -248,6 +249,7 @@ func TestMP_T_CRASH_E(t *testing.T) {
 					"LEDGERBOARD_TEST_OP=renew", "LEDGERBOARD_TEST_DB=" + dbPath,
 					"LEDGERBOARD_TEST_TICKET=" + tk, "LEDGERBOARD_TEST_ACTOR=agent:builder-1",
 					fmt.Sprintf("LEDGERBOARD_TEST_GEN=%d", ct.Claim.Generation),
+					"LEDGERBOARD_CLOCK=fake", "LEDGERBOARD_CLOCK_FILE=" + clockFile,
 				}...)...)
 				res := retry.Line(t, 30*time.Second)
 				_, _ = retry.Wait(t)

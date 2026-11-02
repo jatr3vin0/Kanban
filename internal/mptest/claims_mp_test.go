@@ -219,7 +219,7 @@ func TestMP_T_CLAIM_08_EXPIRY_RACE(t *testing.T) {
 	assert.Equal(t, int64(2), num(claimRes, "generation"), "generation monotonic 1 -> 2")
 
 	pdb := ParentDB(t, dbPath)
-	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='agent:new-claimant' AND lease_generation=2 AND status='in_progress'`, tk))
+	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='new-claimant' AND lease_generation=2 AND status='in_progress'`, tk), "lease_holder stores the bare actor id (claimStatement binds req.Actor.ID; the type lives in lease_holder_type)")
 	assert.Equal(t, int64(0), pdb.Int(t, `SELECT lease_renewals FROM tickets WHERE id=?`, tk), "the failed renew must not have written")
 	SaveEvidence(t, ev, "output.json", DumpJSON(results))
 	EvidenceNote(t, ev, "verdict.txt", "T-CLAIM-08(ii) MP PASS: lapsed renew loses with a diagnosis, claim wins, generation 1->2, invariants hold\n")
@@ -271,7 +271,7 @@ func TestMP_T_FENCING(t *testing.T) {
 	assert.Equal(t, int64(3), num(detailOf(foreign), "lease_generation"), "details carry the CURRENT generation")
 
 	pdb := ParentDB(t, dbPath)
-	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='agent:builder-1' AND lease_generation=3`, tk))
+	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM tickets WHERE id=? AND lease_holder='builder-1' AND lease_generation=3`, tk), "lease_holder stores the bare actor id; holder_type is the separate column")
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"release": rel, "reclaim": recl, "stale_renew": stale, "foreign_claim": foreign}))
 	EvidenceNote(t, ev, "verdict.txt", "FENCING MP PASS: stale generation rejected cross-process with expected/current details; foreign claim sees holder's current details\n")
 }

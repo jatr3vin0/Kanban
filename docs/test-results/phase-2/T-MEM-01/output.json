@@ -1,0 +1,114 @@
+{
+  "calls": [
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 0 from builder-1",
+      "created_at": "2026-11-02T00:55:53.362Z",
+      "external_id": "mem_01de6eb40307442f846d9b747760044f",
+      "handoff_id": "f4224ca3175a47f2bc2dbacd0eb0e9b3",
+      "id": "01de6eb40307442f846d9b747760044f",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 1,
+      "tags": [],
+      "ticket_id": "4a60dc78f6ab46b9a443409f1c1fcdfe",
+      "type": "fact"
+    },
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 2 from builder-1",
+      "created_at": "2026-11-02T00:55:53.362Z",
+      "external_id": "mem_3f634506b1a64a269e3cc557489d0969",
+      "handoff_id": "f4224ca3175a47f2bc2dbacd0eb0e9b3",
+      "id": "3f634506b1a64a269e3cc557489d0969",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 2,
+      "tags": [],
+      "ticket_id": "4a60dc78f6ab46b9a443409f1c1fcdfe",
+      "type": "fact"
+    },
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 1 from builder-1",
+      "created_at": "2026-11-02T00:55:53.362Z",
+      "external_id": "mem_6b04af7e6f754c37bb313f3b20b2aa69",
+      "handoff_id": "f4224ca3175a47f2bc2dbacd0eb0e9b3",
+      "id": "6b04af7e6f754c37bb313f3b20b2aa69",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 3,
+      "tags": [],
+      "ticket_id": "4a60dc78f6ab46b9a443409f1c1fcdfe",
+      "type": "fact"
+    },
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 5 from builder-1",
+      "created_at": "2026-11-02T00:55:53.362Z",
+      "external_id": "mem_99bebe451b4e4fa0b24625f6e2638f28",
+      "handoff_id": "f4224ca3175a47f2bc2dbacd0eb0e9b3",
+      "id": "99bebe451b4e4fa0b24625f6e2638f28",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 4,
+      "tags": [],
+      "ticket_id": "4a60dc78f6ab46b9a443409f1c1fcdfe",
+      "type": "fact"
+    },
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 3 from builder-1",
+      "created_at": "2026-11-02T00:55:53.362Z",
+      "external_id": "mem_d62ca026b7d8438bbe82f2ca05c6c006",
+      "handoff_id": "f4224ca3175a47f2bc2dbacd0eb0e9b3",
+      "id": "d62ca026b7d8438bbe82f2ca05c6c006",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 5,
+      "tags": [],
+      "ticket_id": "4a60dc78f6ab46b9a443409f1c1fcdfe",
+      "type": "fact"
+    },
+    {
+      "actor": "agent:builder-1",
+      "actor_type": "agent",
+      "confidence": 0.75,
+      "content": "write 4 from builder-1",
+      "created_at": "2026-11-02T00:55:53.362Z",
+      "external_id": "mem_fd7518c571814dbd80242f119720d5b9",
+      "handoff_id": "f4224ca3175a47f2bc2dbacd0eb0e9b3",
+      "id": "fd7518c571814dbd80242f119720d5b9",
+      "op": "write",
+      "outcome": "ok",
+      "seq": 6,
+      "tags": [],
+      "ticket_id": "4a60dc78f6ab46b9a443409f1c1fcdfe",
+      "type": "fact"
+    }
+  ],
+  "lease_owners": [
+    "\u003cunclaimed\u003e"
+  ],
+  "worker_a": {
+    "delivered": 6,
+    "elapsed_ms": 3,
+    "ok": true,
+    "op": "outbox_loop"
+  },
+  "worker_b": {
+    "elapsed_ms": 8,
+    "ok": true,
+    "op": "outbox_loop"
+  }
+}

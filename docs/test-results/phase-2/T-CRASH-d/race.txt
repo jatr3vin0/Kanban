@@ -1,0 +1,23 @@
+# Bounded -race attempt (brief step 3): CGO_ENABLED=1 go test ./internal/mptest -race on the six fixed rows (T-CLAIM-01, T-CLAIM-08, T-FENCING, T-CRASH-A/B/E), -timeout 8m, wall-kill 15m.
+--- FAIL: TestMP_T_CLAIM_08_EXPIRY_RACE (0.12s)
+    claims_mp_test.go:215: 
+        	Error Trace:	/home/team/shared/ledgerboard/internal/mptest/claims_mp_test.go:215
+        	Error:      	Not equal: 
+        	            	expected: 1
+        	            	actual  : 2
+        	Test:       	TestMP_T_CLAIM_08_EXPIRY_RACE
+        	Messages:   	exactly one of renew/claim wins
+    claims_mp_test.go:216: 
+        	Error Trace:	/home/team/shared/ledgerboard/internal/mptest/claims_mp_test.go:216
+        	Error:      	Should be false
+        	Test:       	TestMP_T_CLAIM_08_EXPIRY_RACE
+        	Messages:   	a lapsed lease is never resurrected by its holder (C-CLAIM-14)
+    claims_mp_test.go:217: 
+        	Error Trace:	/home/team/shared/ledgerboard/internal/mptest/claims_mp_test.go:217
+        	Error:      	[]string{"lease_expired", "not_claim_holder"} does not contain ""
+        	Test:       	TestMP_T_CLAIM_08_EXPIRY_RACE
+        	Messages:   	the loser is diagnosed, never 500: map[generation:1 lease_expires_at_ms:1.793581791624e+12 ok:true op:renew ticket_id:04725327b01147dea97e989a684c41e4 version:2]
+FAIL
+FAIL	github.com/rgracey/kanban-mcp/internal/mptest	18.065s
+FAIL
+# RACE_EXIT=1
