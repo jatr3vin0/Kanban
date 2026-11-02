@@ -3,42 +3,42 @@
     "details": {
       "holder": "builder-1",
       "holder_type": "agent",
-      "lease_expires_at": 1793591384343,
+      "lease_expires_at": 1793593579936,
       "lease_generation": 3,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "36bf77ca900e4ba697d5e7ba1a85b75f",
+      "ticket_id": "1639765a99e84d839ba02c7c9d25f853",
       "version": 4
     },
-    "err_message": "ticket 36bf77ca900e4ba697d5e7ba1a85b75f is held by builder-1 until 2026-11-02T03:49:44.343Z",
+    "err_message": "ticket 1639765a99e84d839ba02c7c9d25f853 is held by builder-1 until 2026-11-02T04:26:19.936Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "36bf77ca900e4ba697d5e7ba1a85b75f"
+    "ticket_id": "1639765a99e84d839ba02c7c9d25f853"
   },
   "reclaim": {
     "generation": 3,
     "holder": "builder-1",
-    "lease_expires_at_ms": 1793591384343,
+    "lease_expires_at_ms": 1793593579936,
     "ok": true,
     "op": "claim",
-    "ticket_id": "36bf77ca900e4ba697d5e7ba1a85b75f",
+    "ticket_id": "1639765a99e84d839ba02c7c9d25f853",
     "version": 4
   },
   "release": {
     "generation": 2,
     "ok": true,
     "op": "release",
-    "ticket_id": "36bf77ca900e4ba697d5e7ba1a85b75f",
+    "ticket_id": "1639765a99e84d839ba02c7c9d25f853",
     "version": 3
   },
   "stale_renew": {
     "details": {
       "current_generation": 3,
       "expected_generation": 1,
-      "ticket_id": "36bf77ca900e4ba697d5e7ba1a85b75f"
+      "ticket_id": "1639765a99e84d839ba02c7c9d25f853"
     },
-    "err_message": "ticket 36bf77ca900e4ba697d5e7ba1a85b75f is at generation 3, not the presented 1",
+    "err_message": "ticket 1639765a99e84d839ba02c7c9d25f853 is at generation 3, not the presented 1",
     "error_code": "lease_generation_mismatch",
     "ok": false,
     "op": "renew"

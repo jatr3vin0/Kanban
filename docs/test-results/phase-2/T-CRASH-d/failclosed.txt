@@ -1,4 +1,4 @@
 B1 exit=1
 output:
-{"time":"2026-11-02T03:35:18.436390826Z","level":"ERROR","msg":"failed to open database","error":"database /tmp/ledgerboard-scratch/T-CRASH-d/crashed-1.db is at migration version 2 with dirty=1: a previous migration did not complete, so this process refuses to start (C-SCHEMA-19). Inspect the schema, then clear the flag with an explicit force to a known-good version — `migrate force 1` (golang-migrate CLI, same schema_migrations table) — and restart; the server never clears it automatically"}
+{"time":"2026-11-02T04:11:54.229743136Z","level":"ERROR","msg":"failed to open database","error":"database /tmp/ledgerboard-scratch/T-CRASH-d/crashed-1.db is at migration version 2 with dirty=1: a previous migration did not complete, so this process refuses to start (C-SCHEMA-19). Inspect the schema, then clear the flag with an explicit force to a known-good version — `migrate force 1` (golang-migrate CLI, same schema_migrations table) — and restart; the server never clears it automatically"}
 

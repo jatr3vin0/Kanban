@@ -4,21 +4,21 @@ One line per row, exactly as `go test -v` reported it. Transcript: `multiprocess
 
 | Row | Result | Duration |
 |---|---|---|
-| TestMP_T_CLAIM_01 | PASS | 0.19s |
+| TestMP_T_CLAIM_01 | PASS | 0.56s |
 | TestMP_T_CLAIM_16 | PASS | 7.41s |
-| TestMP_T_CLAIM_08_EXPIRY_RACE | PASS | 0.01s |
-| TestMP_T_FENCING | PASS | 0.02s |
-| TestMP_T_CRASH_A | PASS | 0.61s |
-| TestMP_T_CRASH_B | PASS | 0.85s |
-| TestMP_T_CRASH_E | PASS | 0.48s |
+| TestMP_T_CLAIM_08_EXPIRY_RACE | PASS | 0.02s |
+| TestMP_T_FENCING | PASS | 0.03s |
+| TestMP_T_CRASH_A | PASS | 0.64s |
+| TestMP_T_CRASH_B | PASS | 0.88s |
+| TestMP_T_CRASH_E | PASS | 0.50s |
 | TestMP_T_FALSIFIABLE | PASS | 0.00s |
 | TestMP_T_HAND_09 | PASS | 0.02s |
 | TestMP_T_MIG_01 | PASS | 0.20s |
-| TestMP_T_MIG_02 | PASS | 30.43s |
-| TestMP_T_MIG_04 | PASS | 0.36s |
-| TestMP_T_MIG_05 | FAIL | 0.42s |
-| TestMP_T_MIG_06 | PASS | 0.38s |
-| TestMP_T_CRASH_D | PASS | 0.41s |
+| TestMP_T_MIG_02 | PASS | 30.40s |
+| TestMP_T_MIG_04 | PASS | 0.38s |
+| TestMP_T_MIG_05 | FAIL | 0.48s |
+| TestMP_T_MIG_06 | PASS | 0.43s |
+| TestMP_T_CRASH_D | PASS | 0.43s |
 | TestMP_T_MEM_01 | PASS | 0.03s |
 | TestMP_T_MEM_01_CLAIM_RACE | PASS | 0.02s |
 | TestMP_T_MEM_06 | PASS | 0.02s |

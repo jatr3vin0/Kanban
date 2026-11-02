@@ -2,132 +2,136 @@
   {
     "generation": 1,
     "holder": "claimant-0",
-    "lease_expires_at_ms": 1793591376889,
+    "lease_expires_at_ms": 1793593572448,
     "ok": true,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873",
     "version": 2
   },
   {
     "details": {
       "holder": "claimant-0",
       "holder_type": "agent",
-      "lease_expires_at": 1793591376889,
+      "lease_expires_at": 1793593572448,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+      "ticket_id": "d17659a0a4894479b0cffdf694de9873",
       "version": 2
     },
-    "err_message": "ticket e511b620740a4b4f93adbaaa65c6915a is held by claimant-0 until 2026-11-02T03:49:36.889Z",
+    "elapsed_ms": 2,
+    "err_message": "ticket d17659a0a4894479b0cffdf694de9873 is held by claimant-0 until 2026-11-02T04:26:12.448Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a"
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873"
   },
   {
     "details": {
       "holder": "claimant-0",
       "holder_type": "agent",
-      "lease_expires_at": 1793591376889,
+      "lease_expires_at": 1793593572448,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+      "ticket_id": "d17659a0a4894479b0cffdf694de9873",
       "version": 2
     },
-    "err_message": "ticket e511b620740a4b4f93adbaaa65c6915a is held by claimant-0 until 2026-11-02T03:49:36.889Z",
+    "elapsed_ms": 8,
+    "err_message": "ticket d17659a0a4894479b0cffdf694de9873 is held by claimant-0 until 2026-11-02T04:26:12.448Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a"
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873"
   },
   {
     "details": {
       "holder": "claimant-0",
       "holder_type": "agent",
-      "lease_expires_at": 1793591376889,
+      "lease_expires_at": 1793593572448,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+      "ticket_id": "d17659a0a4894479b0cffdf694de9873",
       "version": 2
     },
-    "elapsed_ms": 1,
-    "err_message": "ticket e511b620740a4b4f93adbaaa65c6915a is held by claimant-0 until 2026-11-02T03:49:36.889Z",
+    "elapsed_ms": 18,
+    "err_message": "ticket d17659a0a4894479b0cffdf694de9873 is held by claimant-0 until 2026-11-02T04:26:12.448Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a"
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873"
   },
   {
     "details": {
       "holder": "claimant-0",
       "holder_type": "agent",
-      "lease_expires_at": 1793591376889,
+      "lease_expires_at": 1793593572448,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+      "ticket_id": "d17659a0a4894479b0cffdf694de9873",
       "version": 2
     },
-    "err_message": "ticket e511b620740a4b4f93adbaaa65c6915a is held by claimant-0 until 2026-11-02T03:49:36.889Z",
+    "elapsed_ms": 33,
+    "err_message": "ticket d17659a0a4894479b0cffdf694de9873 is held by claimant-0 until 2026-11-02T04:26:12.448Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a"
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873"
   },
   {
     "details": {
       "holder": "claimant-0",
       "holder_type": "agent",
-      "lease_expires_at": 1793591376889,
+      "lease_expires_at": 1793593572448,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+      "ticket_id": "d17659a0a4894479b0cffdf694de9873",
       "version": 2
     },
     "elapsed_ms": 3,
-    "err_message": "ticket e511b620740a4b4f93adbaaa65c6915a is held by claimant-0 until 2026-11-02T03:49:36.889Z",
+    "err_message": "ticket d17659a0a4894479b0cffdf694de9873 is held by claimant-0 until 2026-11-02T04:26:12.448Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a"
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873"
   },
   {
     "details": {
       "holder": "claimant-0",
       "holder_type": "agent",
-      "lease_expires_at": 1793591376889,
+      "lease_expires_at": 1793593572448,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+      "ticket_id": "d17659a0a4894479b0cffdf694de9873",
       "version": 2
     },
-    "err_message": "ticket e511b620740a4b4f93adbaaa65c6915a is held by claimant-0 until 2026-11-02T03:49:36.889Z",
+    "elapsed_ms": 4,
+    "err_message": "ticket d17659a0a4894479b0cffdf694de9873 is held by claimant-0 until 2026-11-02T04:26:12.448Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a"
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873"
   },
   {
     "details": {
       "holder": "claimant-0",
       "holder_type": "agent",
-      "lease_expires_at": 1793591376889,
+      "lease_expires_at": 1793593572448,
       "lease_generation": 1,
       "reason": "lease_active",
       "status": "in_progress",
-      "ticket_id": "e511b620740a4b4f93adbaaa65c6915a",
+      "ticket_id": "d17659a0a4894479b0cffdf694de9873",
       "version": 2
     },
     "elapsed_ms": 1,
-    "err_message": "ticket e511b620740a4b4f93adbaaa65c6915a is held by claimant-0 until 2026-11-02T03:49:36.889Z",
+    "err_message": "ticket d17659a0a4894479b0cffdf694de9873 is held by claimant-0 until 2026-11-02T04:26:12.448Z",
     "error_code": "already_claimed",
     "ok": false,
     "op": "claim",
-    "ticket_id": "e511b620740a4b4f93adbaaa65c6915a"
+    "ticket_id": "d17659a0a4894479b0cffdf694de9873"
   }
 ]
