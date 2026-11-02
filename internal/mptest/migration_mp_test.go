@@ -827,39 +827,69 @@ func TestMP_T_CRASH_D(t *testing.T) {
 	allowlist := masterObjects(t, dbprocBin, cleanPath)
 
 	// ---- B1: the dirty-boundary kill ---------------------------------------
-	crashPath := filepath.Join(dir, "crashed.db")
-	copyFixture(t, fixturePath, crashPath)
+	// The watcher must have POLLED before the server can start, or a fast
+	// migration completes before the watcher's first observation and the leg
+	// times out with only end-state landmarks (run 6, loaded box: the watcher's
+	// own process startup lost the race). The watcher therefore announces its
+	// first poll with an `attached` line and the server starts only after it.
+	// If a watch still misses the window under extreme scheduling pressure, the
+	// leg retries on a fresh fixture copy — every assertion below is unchanged;
+	// only the observation re-runs, and every miss is recorded as evidence.
+	var (
+		wres   map[string]any
+		saw    []any
+		migLog strings.Builder
+		port   int
+	)
+	var crashPath string
+	b1Attempts := 0
+	for attempt := 1; attempt <= 5; attempt++ {
+		b1Attempts = attempt
+		crashPath = filepath.Join(dir, fmt.Sprintf("crashed-%d.db", attempt))
+		copyFixture(t, fixturePath, crashPath)
 
-	// The watcher: a separate process polling the schema until the dirty flag
-	// is visible. Its SawLandmarks list records which landmarks were reached
-	// and in which observation — the A12 evidence that per-statement landmarks
-	// are not observable (all DDL appears in one observation or not at all).
-	watcher := StartDBProc(t, dbprocBin,
-		"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=wait_schema",
-		"LEDGERBOARD_TEST_DB="+crashPath,
-		"LEDGERBOARD_TEST_WAIT_KIND=dirty", "LEDGERBOARD_TEST_WAIT_NAME=version",
-		"LEDGERBOARD_TEST_WAIT_MAX_MS=20000")
+		// The watcher: a separate process polling the schema until the dirty flag
+		// is visible. Its SawLandmarks list records which landmarks were reached
+		// and in which observation — the A12 evidence that per-statement landmarks
+		// are not observable (all DDL appears in one observation or not at all).
+		watcher := StartDBProc(t, dbprocBin,
+			"LEDGERBOARD_TEST_DBPROC=1", "LEDGERBOARD_TEST_OP=wait_schema",
+			"LEDGERBOARD_TEST_DB="+crashPath,
+			"LEDGERBOARD_TEST_WAIT_KIND=dirty", "LEDGERBOARD_TEST_WAIT_NAME=version",
+			"LEDGERBOARD_TEST_WAIT_MAX_MS=5000")
 
-	// The migrating server.
-	port := nextPort()
-	mig := exec.Command(serverBin, "-port", fmt.Sprint(port), "-db", crashPath, "-mcp-transport", "http", "-log-level", "warn")
-	var migLog strings.Builder
-	mig.Stdout, mig.Stderr = &migLog, &migLog
-	require.NoError(t, mig.Start())
+		// Sequencing point: the watcher's first poll has happened once its
+		// `attached` line is read; only then does the migrating server start.
+		attached := watcher.Line(t, 30*time.Second)
+		require.True(t, okOf(attached), "watcher attach (attempt %d): %v", attempt, attached)
+		require.Equal(t, "attached", attached["phase"], "the watcher must announce its first poll before the server starts")
 
-	// The watcher's result line is the signal; then the controller SIGKILLs
-	// the migrating server — the kill is issued by this separate process, at
-	// a boundary observed by a separate process.
-	wres := watcher.Line(t, 30*time.Second)
-	require.True(t, okOf(wres), "watcher: %v", wres)
-	saw, _ := wres["saw_landmarks"].([]any)
+		// The migrating server.
+		port = nextPort()
+		mig := exec.Command(serverBin, "-port", fmt.Sprint(port), "-db", crashPath, "-mcp-transport", "http", "-log-level", "warn")
+		migLog.Reset()
+		mig.Stdout, mig.Stderr = &migLog, &migLog
+		require.NoError(t, mig.Start())
 
-	require.NoError(t, syscall.Kill(mig.Process.Pid, syscall.SIGKILL))
-	_ = mig.Wait()
-	SaveEvidence(t, ev, "migrating-server-log.txt", migLog.String())
+		// The watcher's result line is the signal; then the controller SIGKILLs
+		// the migrating server — the kill is issued by this separate process, at
+		// a boundary observed by a separate process. On a missed window the kill
+		// still happens (the server has long finished migrating and is serving).
+		wres = watcher.Line(t, 30*time.Second)
+		require.NoError(t, syscall.Kill(mig.Process.Pid, syscall.SIGKILL))
+		_ = mig.Wait()
+		if okOf(wres) {
+			saw, _ = wres["saw_landmarks"].([]any)
+			SaveEvidence(t, ev, "migrating-server-log.txt", migLog.String())
+			break
+		}
+		SaveEvidence(t, ev, fmt.Sprintf("b1-miss-%d.json", attempt), DumpJSON(wres))
+	}
+	require.True(t, okOf(wres), "watcher: %v (across %d attempts — the dirty window was never observed; treat as a real finding if it persists)", wres, b1Attempts)
 	SaveEvidence(t, ev, "landmarks.json", DumpJSON(map[string]any{
 		"saw_landmarks": saw,
-		"note":          "A12 finding (accepted): the landmarks appear together in one observation — the vendored driver commits the whole migration file as ONE transaction, so per-statement landmarks (k=1..20) are not observable. The observable boundaries are the dirty window (B1, killed here) and DDL-complete-with-dirty (B2, constructed below); §4.3 was amended accordingly.",
+		"b1_attempts":   b1Attempts,
+		"note":          "A12 finding (accepted): the landmarks appear together in one observation — the vendored driver commits the whole migration file as ONE transaction, so per-statement landmarks (k=1..20) are not observable. The observable boundaries are the dirty window (B1, killed here) and DDL-complete-with-dirty (B2, constructed below); §4.3 was amended accordingly. b1_attempts records how many watch attempts the dirty window needed (the watcher attaches before the server starts; a miss means the window was missed under scheduling pressure, not that it does not exist).",
 	}))
 
 	// Post-kill state: the dirty flag is set, the 0001 data is intact.

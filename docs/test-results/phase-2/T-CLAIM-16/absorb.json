@@ -2,9 +2,9 @@
   "elapsed_ms": 1231,
   "generation": 1,
   "holder": "busy-claimant",
-  "lease_expires_at_ms": 1793585396948,
+  "lease_expires_at_ms": 1793591377060,
   "ok": true,
   "op": "claim",
-  "ticket_id": "f8aae37fbf2645fa8d0eba6cb602e0f9",
+  "ticket_id": "a5e0d84106a84756b4bd336eeafc3a13",
   "version": 2
 }

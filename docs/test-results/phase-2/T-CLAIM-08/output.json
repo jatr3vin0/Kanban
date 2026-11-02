@@ -1,23 +1,23 @@
 [
   {
     "details": {
-      "holder": "new-claimant",
-      "holder_type": "agent",
-      "ticket_id": "2a2d3b5a3a134b6ea326436b3d1d3683"
+      "current_generation": 1,
+      "lease_expires_at": 1793591384330,
+      "ticket_id": "f09e7b6bfd7a4c979bd40e025c9bf292"
     },
-    "elapsed_ms": 1,
-    "err_message": "ticket 2a2d3b5a3a134b6ea326436b3d1d3683 is not held by agent:lapsed-holder",
-    "error_code": "not_claim_holder",
+    "err_message": "the lease on ticket f09e7b6bfd7a4c979bd40e025c9bf292 lapsed; re-claim it instead of renewing",
+    "error_code": "lease_expired",
     "ok": false,
     "op": "renew"
   },
   {
+    "elapsed_ms": 1,
     "generation": 2,
     "holder": "new-claimant",
-    "lease_expires_at_ms": 1793586364231,
+    "lease_expires_at_ms": 1793592344330,
     "ok": true,
     "op": "claim",
-    "ticket_id": "2a2d3b5a3a134b6ea326436b3d1d3683",
+    "ticket_id": "f09e7b6bfd7a4c979bd40e025c9bf292",
     "version": 3
   }
 ]

@@ -308,7 +308,9 @@ func opWaitSchema(conn *sql.DB, res *result) error {
 	}
 	start := time.Now()
 	seen := map[string]bool{}
-	for {
+	// pollOnce runs one observation pass over the schema and records any newly
+	// visible landmarks on res; it reports whether dirty=1 was seen in this pass.
+	pollOnce := func() bool {
 		var (
 			hasVersionCol, hasHandoffIDCol        bool
 			handoffsTable, outboxTable, idemTable bool
@@ -347,6 +349,21 @@ func opWaitSchema(conn *sql.DB, res *result) error {
 			seen["dirty"] = true
 			res.SawLandmarks = append(res.SawLandmarks, "dirty")
 		}
+		return dirtySeen
+	}
+	// The FIRST observation is announced on stdout before the op blocks: the
+	// row starts the migrating server only after reading this `attached` line,
+	// so the watcher's first poll is guaranteed to precede the migration. Run 6
+	// exposed the race without it — under a loaded box the watcher's own
+	// process startup lost to the server's fast migration and its first poll
+	// saw only the end state (dirty:version never observed, 20s timeout).
+	dirtySeen := pollOnce()
+	_ = dirtySeen
+	if b, err := json.Marshal(map[string]any{"op": "wait_schema", "phase": "attached", "ok": true, "saw_landmarks": res.SawLandmarks}); err == nil {
+		fmt.Println(string(b))
+	}
+	for {
+		dirtySeen := pollOnce()
 		done := false
 		switch kind {
 		case "column":

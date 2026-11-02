@@ -2,10 +2,10 @@
   "details": {
     "retry_after_ms": 1000
   },
-  "elapsed_ms": 5004,
+  "elapsed_ms": 4734,
   "err_message": "the database write lock could not be acquired; retry",
   "error_code": "database_busy",
   "ok": false,
   "op": "claim",
-  "ticket_id": "cdf17b65c0da48e780286138a23b2681"
+  "ticket_id": "207ae705cab94bd09512d506ebc0d275"
 }

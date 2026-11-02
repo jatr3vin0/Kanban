@@ -1,4 +1,1 @@
-FAIL — the row did not pass; read the go test transcript for the failed assertions.
-This file is derived from t.Failed() (review §4): it is written as FAIL whenever
-any assertion in the row failed or the row died early, and carries the PASS line
-below only when every assertion actually ran and passed.
+C-OUTBOX-7 MP PASS: only the lease-holding worker's ack lands (the row's WHERE lease_owner guard decides); the winning ack clears the lease with the status and writes the external id — succeeded row: lease_owner NULL, one audit

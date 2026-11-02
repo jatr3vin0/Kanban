@@ -65,10 +65,27 @@ REST=$?
 
 # Deliberate promotion: scratch evidence -> docs (the author's act; re-running
 # the suite alone leaves the tree clean — review addendum §8).
+#
+# finding-*.md files are hand-authored documents (A12, A14, …) that live inside
+# row directories. They are NOT run artifacts: the run-5 promotion deleted the
+# committed finding-A12.md with the row dirs (47fb64a) — back them up before
+# the sweep and restore them after, so a promotion can never eat a finding.
+FIND_BAK="$(mktemp -d)"
+(cd "$DOCS_EV" && find . -path './T-*/finding-*.md' -type f -print0) \
+  | while IFS= read -r -d '' f; do
+      mkdir -p "$FIND_BAK/$(dirname "$f")"
+      cp -a "$DOCS_EV/$f" "$FIND_BAK/$f"
+    done
 cp "$SCRATCH_EV-transcript.txt" "$MP_TXT"
 cp "$SCRATCH_EV-regression.txt" "$REG_TXT"
 rm -rf "$DOCS_EV"/T-*/
 find "$SCRATCH_EV" -maxdepth 1 -type d -name 'T-*' -exec cp -a {} "$DOCS_EV"/ \;
+(cd "$FIND_BAK" && find . -type f -print0) \
+  | while IFS= read -r -d '' f; do
+      mkdir -p "$DOCS_EV/$(dirname "$f")"
+      cp -a "$FIND_BAK/$f" "$DOCS_EV/$f"
+    done
+rm -rf "$FIND_BAK"
 
 echo "== run-test-plan.sh: MP=$MP rest=$REST — index.md/summary.md/evidence promoted to $DOCS_EV"
 [ "$MP" -eq 0 ] && [ "$REST" -eq 0 ]

@@ -200,7 +200,10 @@ func TestMP_T_MEM_06(t *testing.T) {
 	pdb := ParentDB(t, dbPath)
 	assert.Equal(t, "processing", pdb.Str(t, `SELECT status FROM outbox`), "the row is stuck in processing")
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT attempts FROM outbox`), "attempts incremented at claim")
-	assert.Equal(t, int64(1), len(readCalls(t, calls)), "the far end already took the write (at-least-once)")
+	// int comparison: testify's DeepEqual is type-strict, so int64(1) vs the
+	// int len() returns fails on every run regardless of the value (run-5 root
+	// cause; the sibling row T-CRASH-c asserts the same fact via require.Len).
+	assert.Equal(t, 1, len(readCalls(t, calls)), "the far end already took the write (at-least-once)")
 
 	// Fake clock past the 60 s processing lease: relabelled, not waited.
 	WriteClockMS(t, clockFile, base+OutboxLeaseMS()+60000)
@@ -310,7 +313,10 @@ func TestMP_T_CRASH_C(t *testing.T) {
 // lease guard makes the stale worker harmless. Simulated with two processes:
 // A claims, the clock passes the lease, B reclaims+delivers, then A (if it
 // were still alive) acking must affect 0 rows — observed here as: after B's
-// delivery the row shows worker-b's ownership and one audit only.
+// delivery the row is `succeeded` with exactly ONE audit and the external_id
+// the holder wrote. The winning ack's own UPDATE (C-OUTBOX-2, guarded
+// `WHERE id = ? AND lease_owner = ?`) clears the lease with the status, so a
+// succeeded row holds no lease and a stale ack's second audit never appears.
 func TestMP_T_MEM_06_STALE(t *testing.T) {
 	dir := TestDir(t, "T-MEM-06-STALE")
 	ev := EvidenceDir(t, "T-MEM-06-STALE", "go test ./internal/mptest -run '^TestMP_T_MEM_06_STALE$' -count=1 -v  (MP: stale worker ack is harmless, C-OUTBOX-7)")
@@ -341,8 +347,15 @@ func TestMP_T_MEM_06_STALE(t *testing.T) {
 
 	pdb := ParentDB(t, dbPath)
 	assert.Equal(t, "succeeded", pdb.Str(t, `SELECT status FROM outbox`))
-	assert.Equal(t, "fresh-worker", pdb.Str(t, `SELECT lease_owner FROM outbox`), "the winning ack is the lease holder at ack time")
+	// The winning ack is the lease holder at ack time, and C-OUTBOX-2's
+	// committed UPDATE guards `WHERE id = ? AND lease_owner = ?` while clearing
+	// the lease in the same statement — a succeeded row holds no lease
+	// (internal/store/outbox.go AckOutboxRow). A stale ack would have affected
+	// 0 rows and written no external id (C-OUTBOX-7); only the holder's single
+	// delivery is observable below.
+	assert.Equal(t, "", pdb.Str(t, `SELECT lease_owner FROM outbox`), "a succeeded row holds no lease: the winning ack's UPDATE sets lease_owner=NULL (C-OUTBOX-2)")
+	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM outbox WHERE external_id IS NOT NULL`), "the winning ack wrote the external id; a stale ack writes none (C-OUTBOX-2/7)")
 	assert.Equal(t, int64(1), pdb.Int(t, `SELECT COUNT(*) FROM ticket_events WHERE type='memory_delivered'`))
 	SaveEvidence(t, ev, "output.json", DumpJSON(map[string]any{"claim": ares, "deliver": bres}))
-	VerdictNote(t, ev, "C-OUTBOX-7 MP PASS: only the lease-holding worker's ack lands; the row's WHERE lease_owner guard decides\n")
+	VerdictNote(t, ev, "C-OUTBOX-7 MP PASS: only the lease-holding worker's ack lands (the row's WHERE lease_owner guard decides); the winning ack clears the lease with the status and writes the external id — succeeded row: lease_owner NULL, one audit\n")
 }

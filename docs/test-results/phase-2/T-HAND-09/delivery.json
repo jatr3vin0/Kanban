@@ -5,15 +5,15 @@
       "actor_type": "agent",
       "confidence": 0.75,
       "content": "write 1 from builder-1",
-      "created_at": "2026-11-02T01:55:06.537Z",
-      "external_id": "mem_879c46697c984818a109a03e2c15678c",
-      "handoff_id": "173a948ad5c74cd3a63adb4887ceaa82",
-      "id": "879c46697c984818a109a03e2c15678c",
+      "created_at": "2026-11-02T03:34:46.303Z",
+      "external_id": "mem_45ac226135af4125b7cf48598a0170dd",
+      "handoff_id": "31019f4e2921436e88fb80f89678509f",
+      "id": "45ac226135af4125b7cf48598a0170dd",
       "op": "write",
       "outcome": "ok",
       "seq": 1,
       "tags": [],
-      "ticket_id": "1352b294819d4b528fa7fdeecc6119a7",
+      "ticket_id": "808b17bc92f0410aac7358a48cb6a185",
       "type": "fact"
     },
     {
@@ -21,15 +21,15 @@
       "actor_type": "agent",
       "confidence": 0.75,
       "content": "write 0 from builder-1",
-      "created_at": "2026-11-02T01:55:06.537Z",
-      "external_id": "mem_adf9de8a1c7648d788171b7b2d34e791",
-      "handoff_id": "173a948ad5c74cd3a63adb4887ceaa82",
-      "id": "adf9de8a1c7648d788171b7b2d34e791",
+      "created_at": "2026-11-02T03:34:46.303Z",
+      "external_id": "mem_501cf24c0f424bbcbfdbbb2223367862",
+      "handoff_id": "31019f4e2921436e88fb80f89678509f",
+      "id": "501cf24c0f424bbcbfdbbb2223367862",
       "op": "write",
       "outcome": "ok",
       "seq": 2,
       "tags": [],
-      "ticket_id": "1352b294819d4b528fa7fdeecc6119a7",
+      "ticket_id": "808b17bc92f0410aac7358a48cb6a185",
       "type": "fact"
     },
     {
@@ -37,27 +37,27 @@
       "actor_type": "agent",
       "confidence": 0.75,
       "content": "write 2 from builder-1",
-      "created_at": "2026-11-02T01:55:06.537Z",
-      "external_id": "mem_ef9bc3699d014495b97ab07aefd3e384",
-      "handoff_id": "173a948ad5c74cd3a63adb4887ceaa82",
-      "id": "ef9bc3699d014495b97ab07aefd3e384",
+      "created_at": "2026-11-02T03:34:46.303Z",
+      "external_id": "mem_cb0b4be6e4234d50be7c544e952f5c28",
+      "handoff_id": "31019f4e2921436e88fb80f89678509f",
+      "id": "cb0b4be6e4234d50be7c544e952f5c28",
       "op": "write",
       "outcome": "ok",
       "seq": 3,
       "tags": [],
-      "ticket_id": "1352b294819d4b528fa7fdeecc6119a7",
+      "ticket_id": "808b17bc92f0410aac7358a48cb6a185",
       "type": "fact"
     }
   ],
   "contract_order": [
-    "879c46697c984818a109a03e2c15678c",
-    "adf9de8a1c7648d788171b7b2d34e791",
-    "ef9bc3699d014495b97ab07aefd3e384"
+    "45ac226135af4125b7cf48598a0170dd",
+    "501cf24c0f424bbcbfdbbb2223367862",
+    "cb0b4be6e4234d50be7c544e952f5c28"
   ],
   "delivered": [
-    "879c46697c984818a109a03e2c15678c",
-    "adf9de8a1c7648d788171b7b2d34e791",
-    "ef9bc3699d014495b97ab07aefd3e384"
+    "45ac226135af4125b7cf48598a0170dd",
+    "501cf24c0f424bbcbfdbbb2223367862",
+    "cb0b4be6e4234d50be7c544e952f5c28"
   ],
   "worker": {
     "delivered": 3,
